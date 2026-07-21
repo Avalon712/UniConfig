@@ -1,0 +1,22 @@
+{
+    "name": "UniConfig.Editor",
+    "rootNamespace": "UniConfig.Editor",
+    "references": [
+        "GUID:1996dd6d1973b4649858025ad7a8aee1"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "MemoryPack.Core.dll",
+        "System.Collections.Immutable.dll",
+        "System.Runtime.CompilerServices.Unsafe.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
