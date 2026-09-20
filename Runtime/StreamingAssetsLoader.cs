@@ -18,7 +18,7 @@ namespace UniConfig
         private Parser _parser;
         private UnityWebRequest _request;
 
-        public AsyncOperation RunLoader(string assetPath, int bufferSize, Action<Dictionary<int, object>> onCompleted)
+        public void RunLoader(string assetPath, int bufferSize, Action<Dictionary<int, object>> onCompleted)
         {
             _onCompleted = onCompleted;
             int size = Math.Max(256, bufferSize);
@@ -27,7 +27,6 @@ namespace UniConfig
             _request.downloadHandler = _parser;
             _asyncOperation = _request.SendWebRequest();
             StartCoroutine(WaitCompleted());
-            return _asyncOperation;
         }
 
         private IEnumerator WaitCompleted()

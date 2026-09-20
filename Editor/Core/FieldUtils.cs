@@ -2,6 +2,7 @@
 
 using System;
 using System.Globalization;
+using UnityEngine;
 
 #endregion
 
@@ -14,7 +15,9 @@ namespace UniConfig.Editor
             "short", "int", "long", "ushort", "uint", "ulong", "float", "double", "bool", "string",
             "short[]", "int[]", "long[]", "ushort[]", "uint[]", "ulong[]", "bool[]", "float[]", "double[]",
             "short[][]", "int[][]", "long[][]", "ushort[][]", "uint[][]", "ulong[][]", "bool[][]", "float[][]",
-            "double[][]"
+            "double[][]",
+            "Vector2", "Vector3", "Vector4", "Quaternion", "Vector2Int", "Vector3Int",
+            "Color", "Color32"
         };
 
         public static readonly object[] DEFAULT_VALUES =
@@ -24,7 +27,9 @@ namespace UniConfig.Editor
             Array.Empty<uint>(), Array.Empty<ulong>(), Array.Empty<bool>(), Array.Empty<float>(), Array.Empty<double>(),
             Array.Empty<short[]>(), Array.Empty<int[]>(), Array.Empty<long[]>(), Array.Empty<ushort[]>(),
             Array.Empty<uint[]>(), Array.Empty<ulong[]>(), Array.Empty<bool[]>(), Array.Empty<float[]>(),
-            Array.Empty<double[]>()
+            Array.Empty<double[]>(),
+            Vector2.zero, Vector3.zero, Vector4.zero, Quaternion.identity, Vector2Int.zero, Vector3Int.zero,
+            Color.clear, new Color32(0, 0, 0, 0)
         };
 
         /// <summary>
@@ -124,6 +129,42 @@ namespace UniConfig.Editor
                         return Parse2D(value, s => float.Parse(s, CultureInfo.InvariantCulture));
                     case SupportableFieldType.Array2D_Double:
                         return Parse2D(value, s => double.Parse(s, CultureInfo.InvariantCulture));
+
+                    case SupportableFieldType.Vector2:
+                    {
+                        float[] c = ParseFloatComponents(value, 2);
+                        return new Vector2(c[0], c[1]);
+                    }
+                    case SupportableFieldType.Vector3:
+                    {
+                        float[] c = ParseFloatComponents(value, 3);
+                        return new Vector3(c[0], c[1], c[2]);
+                    }
+                    case SupportableFieldType.Vector4:
+                    {
+                        float[] c = ParseFloatComponents(value, 4);
+                        return new Vector4(c[0], c[1], c[2], c[3]);
+                    }
+                    case SupportableFieldType.Quaternion:
+                    {
+                        float[] c = ParseFloatComponents(value, 4);
+                        return new Quaternion(c[0], c[1], c[2], c[3]);
+                    }
+                    case SupportableFieldType.Vector2Int:
+                    {
+                        int[] c = ParseIntComponents(value, 2);
+                        return new Vector2Int(c[0], c[1]);
+                    }
+                    case SupportableFieldType.Vector3Int:
+                    {
+                        int[] c = ParseIntComponents(value, 3);
+                        return new Vector3Int(c[0], c[1], c[2]);
+                    }
+                    case SupportableFieldType.Color:
+                        return ParseColor(value);
+                    case SupportableFieldType.Color32:
+                        return ParseColor32(value);
+
                     default:
                         throw new ArgumentOutOfRangeException(nameof(fieldType), fieldType, null);
                 }
@@ -195,6 +236,142 @@ namespace UniConfig.Editor
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 解析定长浮点分量。支持 <c>1,2,3</c> 或 <c>(1, 2, 3)</c>。
+        /// </summary>
+        private static float[] ParseFloatComponents(string value, int exactCount)
+        {
+            return ParseFloatComponents(value, exactCount, exactCount);
+        }
+
+        private static float[] ParseFloatComponents(string value, int minCount, int maxCount)
+        {
+            string[] parts = SplitComponents(value);
+            if (parts.Length < minCount || parts.Length > maxCount)
+            {
+                string expect = minCount == maxCount
+                    ? exactCountText(minCount)
+                    : $"{minCount}~{maxCount} 个分量";
+                throw new FormatException($"需要 {expect}，实际 {parts.Length} 个");
+            }
+
+            float[] result = new float[parts.Length];
+            for (int i = 0; i < parts.Length; i++)
+                result[i] = float.Parse(parts[i], CultureInfo.InvariantCulture);
+            return result;
+        }
+
+        private static int[] ParseIntComponents(string value, int exactCount)
+        {
+            return ParseIntComponents(value, exactCount, exactCount);
+        }
+
+        private static int[] ParseIntComponents(string value, int minCount, int maxCount)
+        {
+            string[] parts = SplitComponents(value);
+            if (parts.Length < minCount || parts.Length > maxCount)
+            {
+                string expect = minCount == maxCount
+                    ? exactCountText(minCount)
+                    : $"{minCount}~{maxCount} 个分量";
+                throw new FormatException($"需要 {expect}，实际 {parts.Length} 个");
+            }
+
+            int[] result = new int[parts.Length];
+            for (int i = 0; i < parts.Length; i++)
+                result[i] = int.Parse(parts[i], CultureInfo.InvariantCulture);
+            return result;
+        }
+
+        private static string exactCountText(int count) => $"{count} 个分量";
+
+        private static string[] SplitComponents(string value)
+        {
+            string text = value.Trim();
+            if (text.Length >= 2 && text[0] == '(' && text[text.Length - 1] == ')')
+                text = text.Substring(1, text.Length - 2).Trim();
+
+            string[] parts = text.Split(new[] { ',' }, StringSplitOptions.None);
+            for (int i = 0; i < parts.Length; i++)
+                parts[i] = parts[i].Trim();
+            return parts;
+        }
+
+        private static Color ParseColor(string value)
+        {
+            string text = value.Trim();
+            if (text.Length > 0 && text[0] == '#')
+            {
+                Color32 c32 = ParseColor32FromHex(text);
+                return (Color)c32;
+            }
+
+            float[] c = ParseFloatComponents(text, 3, 4);
+            // 若出现 >1 的分量，按 0~255 解释并换算为 0~1
+            bool anyOverOne = false;
+            for (int i = 0; i < c.Length; i++)
+            {
+                if (c[i] > 1f) { anyOverOne = true; break; }
+            }
+
+            if (anyOverOne)
+            {
+                float a = c.Length == 3 ? 1f : Mathf.Clamp01(c[3] / 255f);
+                return new Color(
+                    Mathf.Clamp01(c[0] / 255f),
+                    Mathf.Clamp01(c[1] / 255f),
+                    Mathf.Clamp01(c[2] / 255f),
+                    a);
+            }
+
+            return c.Length == 3
+                ? new Color(c[0], c[1], c[2], 1f)
+                : new Color(c[0], c[1], c[2], c[3]);
+        }
+
+        private static Color32 ParseColor32(string value)
+        {
+            string text = value.Trim();
+            if (text.Length > 0 && text[0] == '#')
+                return ParseColor32FromHex(text);
+
+            int[] c = ParseIntComponents(text, 3, 4);
+            byte a = (byte)(c.Length == 3 ? 255 : ClampByte(c[3]));
+            return new Color32(ClampByte(c[0]), ClampByte(c[1]), ClampByte(c[2]), a);
+        }
+
+        private static Color32 ParseColor32FromHex(string hex)
+        {
+            string h = hex.Substring(1).Trim();
+            if (h.Length == 3 || h.Length == 4)
+            {
+                var expanded = new char[h.Length * 2];
+                for (int i = 0; i < h.Length; i++)
+                {
+                    expanded[i * 2] = h[i];
+                    expanded[i * 2 + 1] = h[i];
+                }
+
+                h = new string(expanded);
+            }
+
+            if (h.Length != 6 && h.Length != 8)
+                throw new FormatException($"无效的十六进制颜色: {hex}");
+
+            byte r = ClampByte(Convert.ToInt32(h.Substring(0, 2), 16));
+            byte g = ClampByte(Convert.ToInt32(h.Substring(2, 2), 16));
+            byte b = ClampByte(Convert.ToInt32(h.Substring(4, 2), 16));
+            byte a = h.Length == 6 ? (byte)255 : ClampByte(Convert.ToInt32(h.Substring(6, 2), 16));
+            return new Color32(r, g, b, a);
+        }
+
+        private static byte ClampByte(int value)
+        {
+            if (value < 0) return 0;
+            if (value > 255) return 255;
+            return (byte)value;
         }
     }
 }

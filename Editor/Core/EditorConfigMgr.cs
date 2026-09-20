@@ -806,6 +806,14 @@ namespace UniConfig.Editor
                 SupportableFieldType.Array2D_Boolean => typeof(bool[][]),
                 SupportableFieldType.Array2D_Single => typeof(float[][]),
                 SupportableFieldType.Array2D_Double => typeof(double[][]),
+                SupportableFieldType.Vector2 => typeof(UnityEngine.Vector2),
+                SupportableFieldType.Vector3 => typeof(UnityEngine.Vector3),
+                SupportableFieldType.Vector4 => typeof(UnityEngine.Vector4),
+                SupportableFieldType.Quaternion => typeof(UnityEngine.Quaternion),
+                SupportableFieldType.Vector2Int => typeof(UnityEngine.Vector2Int),
+                SupportableFieldType.Vector3Int => typeof(UnityEngine.Vector3Int),
+                SupportableFieldType.Color => typeof(UnityEngine.Color),
+                SupportableFieldType.Color32 => typeof(UnityEngine.Color32),
                 _ => throw new ArgumentOutOfRangeException(nameof(fieldType), fieldType, null)
             };
         }

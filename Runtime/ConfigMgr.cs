@@ -79,20 +79,26 @@ namespace UniConfig
         {
             TextAsset asset = Resources.Load<TextAsset>(assetPath);
             if (asset == null)
-                throw new ArgumentException(
-                    $"Resources中未找到配置: \"{assetPath}\"（勿带扩展名，例如 Assets/Resources/configs.bytes → \"configs\"）");
+                throw new ArgumentException($"Resources中未找到配置: \"{assetPath}\"（勿带扩展名，例如 Assets/Resources/configs.bytes → \"configs\"）");
             _configs = ResourcesLoader.ReadAllConfigs(asset.bytes);
         }
 
         /// <summary>
-        /// 从StreamingAssets目录下一次性异步加载所有的配置文件
+        /// 从StreamingAssets目录下一次性异步加载所有的配置文件。
+        /// 返回值须 <c>yield return</c> 等待：完成时配置已写入内部字典（晚于下载结束）。
         /// </summary>
-        public static AsyncOperation LoadAllConfigsFromStreamingAssetsAsync(string assetPath, int bufferSize = 1024)
+        public static ConfigLoadOperation LoadAllConfigsFromStreamingAssetsAsync(string assetPath, int bufferSize = 1024)
         {
+            var operation = new ConfigLoadOperation();
             GameObject go = new(nameof(LoadAllConfigsFromStreamingAssetsAsync));
             StreamingAssetsLoader loader = go.AddComponent<StreamingAssetsLoader>();
             Object.DontDestroyOnLoad(go);
-            return loader.RunLoader(assetPath, bufferSize, cfgs => _configs = cfgs);
+            loader.RunLoader(assetPath, bufferSize, cfgs =>
+            {
+                _configs = cfgs;
+                operation.MarkCompleted();
+            });
+            return operation;
         }
 
         /// <summary>

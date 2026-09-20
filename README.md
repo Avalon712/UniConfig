@@ -109,9 +109,63 @@ https://github.com/Avalon712/UniConfig.git#v1.0.0
 5. 点击 **导出配置**：写出 `configs.bytes`  
    - 若尚有表未生成/未编译对应 C# 类型，会先生成 C#，待 Unity 编译完成后自动继续导出
 
-> 表名须全局唯一（跨模块也不能重名），因为运行时按类型全名区分表。
+> 表名须全局唯一（跨模块也不能重名）。运行时按表唯一 Id 区分表。
 
-### 3. 字段约束（可选）
+### 3. 字段类型与单元格写法
+
+编辑器单元格一律填**字符串**；导出时按字段类型解析。空单元格使用该类型默认值（数值 `0`、`bool` 为 `false`、`string` 为空串、数组为空数组、Unity 向量为零向量 / `Quaternion.identity` / 透明色）。
+
+#### 标量
+
+| 编辑器类型                       | 生成 C#    | 写法示例                         | 说明                  |
+| --------------------------- | -------- | ---------------------------- | ------------------- |
+| `short` / `int` / `long`    | 同左       | `42` / `-1`                  | 十进制整数               |
+| `ushort` / `uint` / `ulong` | 同左       | `0` / `100`                  | 无符号，勿写负号            |
+| `float` / `double`          | 同左       | `1.5` / `-0.25`              | 使用不变区域小数点 `.`       |
+| `bool`                      | `bool`   | `true` / `false` / `1` / `0` | 大小写不敏感              |
+| `string`                    | `string` | `hello` / 任意文本               | 原样保存，不做 Trim 语义外的转换 |
+
+#### 一维数组 `T[]`
+
+用英文逗号 `,` 分隔元素；元素规则与对应标量相同。
+
+| 编辑器类型     | 写法示例             | 结果                      |
+| --------- | ---------------- | ----------------------- |
+| `int[]`   | `1,2,3`          | `{ 1, 2, 3 }`           |
+| `float[]` | `1.0, 2.5, -3`   | 允许空格                    |
+| `bool[]`  | `true,0,1,false` | 混用 `true/false` 与 `0/1` |
+| （空数组）     | 空单元格             | `Array.Empty<T>()`      |
+
+> 单个空段且只有一个部分时视为空数组；不要在末尾随意多写逗号（会产生空元素解析失败）。
+
+#### 二维数组 `T[][]`
+
+行与行之间用英文分号 `;`，行内仍用逗号 `,`。
+
+| 编辑器类型       | 写法示例           | 结果                   |
+| ----------- | -------------- | -------------------- |
+| `int[][]`   | `1,2;3,4,5`    | `{ {1,2}, {3,4,5} }` |
+| `float[][]` | `1.0,2.0; 3.5` | 各行长度可不同              |
+| （空）         | 空单元格           | `Array.Empty<T[]>()` |
+
+#### Unity 数学类型
+
+分量之间用逗号分隔；可选外层圆括号。MemoryPack 可直接序列化这些 unmanaged struct。
+
+| 编辑器类型        | 分量顺序         | 写法示例                                                                      |
+| ------------ | ------------ | ------------------------------------------------------------------------- |
+| `Vector2`    | x, y         | `1.5,2.5` 或 `(1.5, 2.5)`                                                  |
+| `Vector3`    | x, y, z      | `1,2,3`                                                                   |
+| `Vector4`    | x, y, z, w   | `1,0,0,0`                                                                 |
+| `Quaternion` | x, y, z, w   | `0,0,0,1`（单位四元数）                                                          |
+| `Vector2Int` | x, y         | `3,4` / `(-2, 8)`                                                         |
+| `Vector3Int` | x, y, z      | `1,2,3`                                                                   |
+| `Color`      | r, g, b[, a] | `1,0,0,1`（0~1）；`255,128,0,255`（出现 >1 时按 0~255 换算）；`#FF0000` / `#FF0000FF` |
+| `Color32`    | r, g, b[, a] | `255,0,0,255`；`#00FF00` / `#0000FFFF`（a 缺省为 255）                          |
+
+`Color` / `Color32` 的十六进制支持 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`。
+
+### 4. 字段约束（可选）
 
 表工具栏中的 **添加约束** 支持：
 
@@ -150,9 +204,12 @@ public class GameBootstrap : MonoBehaviour
 
 ```csharp
 // Assets/StreamingAssets/configs.bytes  →  "configs.bytes"
-var op = ConfigMgr.LoadAllConfigsFromStreamingAssetsAsync("configs.bytes");
-// 大文件可将 bufferSize 调大，加快分片读取（默认 1024）
-// ConfigMgr.LoadAllConfigsFromStreamingAssetsAsync("configs.bytes", bufferSize: 64 * 1024);
+// 须 yield return：完成时配置才写入完毕（不能只等下载 AsyncOperation）
+IEnumerator Load()
+{
+    yield return ConfigMgr.LoadAllConfigsFromStreamingAssetsAsync("configs.bytes");
+    // 大文件可将 bufferSize 调大：LoadAllConfigsFromStreamingAssetsAsync("configs.bytes", 64 * 1024);
+}
 ```
 
 ### 查询配置
