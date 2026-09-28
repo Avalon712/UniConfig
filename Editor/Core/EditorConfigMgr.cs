@@ -561,7 +561,7 @@ namespace UniConfig.Editor
                         string raw = item.GetValue(field.name);
                         try
                         {
-                            args[i] = FieldUtils.ToValue(raw, field.type);
+                            args[i] = FieldUtils.ToValue(raw, field);
                         }
                         catch (Exception ex)
                         {
@@ -687,7 +687,8 @@ namespace UniConfig.Editor
 
             if (tableMeta.fields != null)
                 foreach (ModuleMetaSerializer.FieldMetaDto field in tableMeta.fields)
-                    table.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type));
+                    table.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type,
+                        field.enumTypeFullName));
 
             if (table.fields.Count == 0)
                 ConfigRawStorage.LoadTableHeader(moduleName, table.tableName, table);
@@ -765,13 +766,21 @@ namespace UniConfig.Editor
         {
             Type[] paramTypes = new Type[table.fields.Count];
             for (int i = 0; i < table.fields.Count; i++)
-                paramTypes[i] = GetClrType(table.fields[i].type);
+                paramTypes[i] = GetClrType(table.fields[i]);
 
             ConstructorInfo ctor = type.GetConstructor(paramTypes);
             if (ctor == null)
                 throw new InvalidOperationException(
                     $"类型 {type.FullName} 缺少与表字段匹配的全参构造函数");
             return ctor;
+        }
+
+        private static Type GetClrType(ConfigField field)
+        {
+            if (field == null) throw new ArgumentNullException(nameof(field));
+            if (field.type == SupportableFieldType.Enum)
+                return EnumTypeUtil.ResolveOrThrow(field.enumTypeFullName);
+            return GetClrType(field.type);
         }
 
         private static Type GetClrType(SupportableFieldType fieldType)

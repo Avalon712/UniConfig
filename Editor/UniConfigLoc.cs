@@ -35,6 +35,24 @@ namespace UniConfig.Editor
             ["settings.tip"] = new[] { "打开 UniConfig 设置", "Open UniConfig settings" },
             ["unsaved"] = new[] { "*未保存", "*Unsaved" },
             ["language"] = new[] { "语言", "Language" },
+            ["settings.enums"] = new[] { "自定义枚举类型", "Custom Enum Types" },
+            ["settings.enums_hint"] = new[]
+            {
+                "使用下方列表添加枚举的完整类型名（含命名空间）。保存后会出现在配置表字段类型下拉中；单元格用下拉选择成员；默认值为底层数值最小的成员。重复项会自动去除。",
+                "Use the list below to add fully-qualified enum type names. They appear in the field-type dropdown; cells use a member popup; default is the smallest underlying value. Duplicates are removed automatically."
+            },
+            ["settings.enums_add"] = new[] { "添加", "Add" },
+            ["settings.enums_dup"] = new[] { "该枚举类型已添加", "This enum type is already added" },
+            ["settings.enums_invalid"] = new[]
+            {
+                "无法添加枚举「{0}」：{1}\n请确认脚本已编译且类型为 enum。",
+                "Cannot add enum \"{0}\": {1}\nEnsure scripts compiled and the type is an enum."
+            },
+            ["type_cat.scalar"] = new[] { "基础", "Scalar" },
+            ["type_cat.array1d"] = new[] { "一维数组", "Array 1D" },
+            ["type_cat.array2d"] = new[] { "二维数组", "Array 2D" },
+            ["type_cat.unity"] = new[] { "Unity", "Unity" },
+            ["type_cat.enum"] = new[] { "枚举", "Enum" },
 
             // 模块工具栏
             ["new_module"] = new[] { "新建", "New" },

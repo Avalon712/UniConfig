@@ -5,7 +5,7 @@
 在编辑器中以模块/表方式管理配置数据，一键生成 C# 类型与二进制配置文件；运行时通过 `ConfigMgr` 加载并查询，内置 **Resources** 与 **StreamingAssets** 两种读取方式。
 
 - **Unity**：2022.3+
-- **版本**：1.0.0
+- **版本**：1.1.0
 - **仓库**：[https://github.com/Avalon712/UniConfig](https://github.com/Avalon712/UniConfig.git)
 
 ---
@@ -53,13 +53,13 @@ https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/Memor
 3. 填入（指定版本标签）：
 
 ```text
-https://github.com/Avalon712/UniConfig.git#v1.0.0
+https://github.com/Avalon712/UniConfig.git#v1.1.0
 ```
 
 或安装最新默认分支：
 
 ```text
-https://github.com/Avalon712/UniConfig.git#v1.0.0
+https://github.com/Avalon712/UniConfig.git
 ```
 
 #### 方式二：manifest.json
@@ -70,7 +70,7 @@ https://github.com/Avalon712/UniConfig.git#v1.0.0
 {
   "dependencies": {
     "com.cysharp.memorypack": "https://github.com/Avalon712/MemoryPackForUnity.git#1.21.4",
-    "org.avalon712.uniconfig": "https://github.com/Avalon712/UniConfig.git#v1.0.0"
+    "org.avalon712.uniconfig": "https://github.com/Avalon712/UniConfig.git#v1.1.0"
   }
 }
 ```
@@ -94,6 +94,7 @@ https://github.com/Avalon712/UniConfig.git#v1.0.0
 | 根命名空间                | 生成类命名空间                        | `Game.Config`            |
 | Resources 导出目录       | `ResourcesExporter` 输出目录       | `Assets/Resources`       |
 | StreamingAssets 导出目录 | `StreamingAssetsExporter` 输出目录 | `Assets/StreamingAssets` |
+| 自定义枚举类型              | 完整类型名列表（`List`），会出现在字段类型菜单中    | （空）                      |
 
 导出文件名固定为 **`configs.bytes`**。
 
@@ -165,12 +166,42 @@ https://github.com/Avalon712/UniConfig.git#v1.0.0
 
 `Color` / `Color32` 的十六进制支持 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`。
 
+#### 自定义枚举
+
+1. 打开 `UniConfig` → `Settings`，在 **自定义枚举类型** 列表中添加完整类型名（如 `Game.ESkillType`），类型必须已编译且为 `enum`；重复项会自动去除。
+2. 配置表字段类型使用**分级菜单**选择（见下）；选中枚举后单元格变为**枚举成员下拉**。
+3. 单元格存成员名（如 `Fire`）；默认值为底层数值**最小**的成员（不必从 0 开始）。
+4. 生成的 C# 字段类型为该枚举的完整类型名；MemoryPack 可直接序列化枚举。
+
+#### 字段类型分级菜单
+
+类型列不再使用超长扁平下拉，改为多级菜单：
+
+| 分类 | 内容 |
+|------|------|
+| 基础 | short / int / long / … / string |
+| 一维数组 | `T[]` |
+| 二维数组 | `T[][]` |
+| Unity | Vector / Quaternion / Color 等 |
+| 枚举 | Settings 中登记的自定义枚举 |
+
 ### 4. 字段约束（可选）
 
 表工具栏中的 **添加约束** 支持：
 
 - **外键**：引用另一张表某字段的取值
 - **公式**：用表达式自动计算字段（可跨表引用）
+
+### 5. 编辑器界面状态
+
+**生成 C#** / **导出配置** 可能触发脚本域重载。编辑器会通过 `SessionState` 记住并自动恢复：
+
+- 当前选中的模块 / 表
+- 左侧树展开状态
+- 数据页码
+- 树搜索 / 表搜索关键字
+
+重载后仍停留在原先编辑的位置，无需重新点开表。
 
 ---
 

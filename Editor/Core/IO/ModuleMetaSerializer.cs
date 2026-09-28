@@ -39,7 +39,8 @@ namespace UniConfig.Editor
                             tableDto.fields.Add(new FieldMetaDto
                             {
                                 name = field.name,
-                                type = (int)field.type
+                                type = (int)field.type,
+                                enumTypeFullName = field.enumTypeFullName ?? string.Empty
                             });
 
                     dto.tables.Add(tableDto);
@@ -82,6 +83,7 @@ namespace UniConfig.Editor
         {
             public string name;
             public int type;
+            public string enumTypeFullName;
         }
     }
 }

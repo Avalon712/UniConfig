@@ -1,8 +1,4 @@
-#region
-
 using System;
-
-#endregion
 
 namespace UniConfig.Editor
 {
@@ -15,14 +11,22 @@ namespace UniConfig.Editor
         public string name;
         public SupportableFieldType type;
 
+        /// <summary>
+        /// 当 <see cref="type"/> 为 <see cref="SupportableFieldType.Enum"/> 时，枚举的完整类型名。
+        /// </summary>
+        public string enumTypeFullName;
+
         public ConfigField()
         {
         }
 
-        public ConfigField(string name, SupportableFieldType type)
+        public ConfigField(string name, SupportableFieldType type, string enumTypeFullName = null)
         {
             this.name = name;
             this.type = type;
+            this.enumTypeFullName = enumTypeFullName ?? string.Empty;
         }
+
+        public bool IsEnum => type == SupportableFieldType.Enum && !string.IsNullOrEmpty(enumTypeFullName);
     }
 }

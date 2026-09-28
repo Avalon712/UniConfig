@@ -1,7 +1,9 @@
 ﻿#region
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using UnityEditor;
 using UnityEngine;
 
 #endregion
@@ -17,7 +19,8 @@ namespace UniConfig.Editor
             "short[][]", "int[][]", "long[][]", "ushort[][]", "uint[][]", "ulong[][]", "bool[][]", "float[][]",
             "double[][]",
             "Vector2", "Vector3", "Vector4", "Quaternion", "Vector2Int", "Vector3Int",
-            "Color", "Color32"
+            "Color", "Color32",
+            "enum"
         };
 
         public static readonly object[] DEFAULT_VALUES =
@@ -29,8 +32,12 @@ namespace UniConfig.Editor
             Array.Empty<uint[]>(), Array.Empty<ulong[]>(), Array.Empty<bool[]>(), Array.Empty<float[]>(),
             Array.Empty<double[]>(),
             Vector2.zero, Vector3.zero, Vector4.zero, Quaternion.identity, Vector2Int.zero, Vector3Int.zero,
-            Color.clear, new Color32(0, 0, 0, 0)
+            Color.clear, new Color32(0, 0, 0, 0),
+            null
         };
+
+        /// <summary>内置类型数量（不含裸 Enum 占位，自定义枚举接在其后）。</summary>
+        public static int BuiltinTypeCount => (int)SupportableFieldType.Enum;
 
         /// <summary>
         /// 获取显示名称
@@ -41,6 +48,13 @@ namespace UniConfig.Editor
             return index >= 0 && index < DISPLAY_NAMES.Length ? DISPLAY_NAMES[index] : string.Empty;
         }
 
+        public static string GetDisplayName(ConfigField field)
+        {
+            if (field != null && field.IsEnum)
+                return EnumTypeUtil.GetDisplayLabel(field.enumTypeFullName);
+            return field == null ? string.Empty : GetDisplayName(field.type);
+        }
+
         /// <summary>
         /// 获取代码生成用的 C# 类型名
         /// </summary>
@@ -49,13 +63,237 @@ namespace UniConfig.Editor
             return GetDisplayName(fieldType);
         }
 
+        public static string GetCsharpTypeName(ConfigField field)
+        {
+            if (field == null) return string.Empty;
+            if (field.type == SupportableFieldType.Enum)
+                return EnumTypeUtil.GetCsharpTypeName(field.enumTypeFullName);
+            return GetDisplayName(field.type);
+        }
+
         /// <summary>
-        /// 获取默认值
+        /// 获取默认值（对象）
         /// </summary>
         public static object GetDefaultValue(SupportableFieldType fieldType)
         {
             int index = (int)fieldType;
             return index >= 0 && index < DEFAULT_VALUES.Length ? DEFAULT_VALUES[index] : null;
+        }
+
+        public static object GetDefaultValue(ConfigField field)
+        {
+            if (field != null && field.type == SupportableFieldType.Enum)
+                return EnumTypeUtil.ParseValue(field.enumTypeFullName, null);
+            return field == null ? null : GetDefaultValue(field.type);
+        }
+
+        /// <summary>
+        /// 单元格默认字符串（枚举为最小数值的成员名）。
+        /// </summary>
+        public static string GetDefaultCellString(ConfigField field)
+        {
+            if (field != null && field.type == SupportableFieldType.Enum)
+                return EnumTypeUtil.GetDefaultMemberName(field.enumTypeFullName);
+            return string.Empty;
+        }
+
+        private static readonly string[] EmptyStrings = Array.Empty<string>();
+
+        private static IReadOnlyList<string> GetRegisteredEnumTypeFullNames()
+        {
+            return (IReadOnlyList<string>)UniConfigEditorSettings.instance.customEnumTypeFullNames
+                   ?? EmptyStrings;
+        }
+
+        /// <summary>
+        /// 类型按钮上显示的短名称。
+        /// </summary>
+        public static string GetTypeButtonLabel(ConfigField field)
+        {
+            if (field == null) return DISPLAY_NAMES[0];
+            if (field.IsEnum)
+            {
+                string full = field.enumTypeFullName ?? string.Empty;
+                int dot = full.LastIndexOf('.');
+                string shortName = dot >= 0 ? full.Substring(dot + 1) : full;
+                return shortName.Replace('+', '.');
+            }
+
+            int index = (int)field.type;
+            return index >= 0 && index < BuiltinTypeCount ? DISPLAY_NAMES[index] : GetDisplayName(field.type);
+        }
+
+        /// <summary>
+        /// 分级菜单选择字段类型（基础 / 数组 / Unity / 枚举）。
+        /// </summary>
+        public static void ShowTypeDropdownMenu(Rect activatorRect, ConfigField field, Action onSelected)
+        {
+            if (field == null) return;
+
+            var menu = new GenericMenu();
+            for (int i = 0; i < BuiltinTypeCount; i++)
+            {
+                int typeIndex = i;
+                SupportableFieldType t = (SupportableFieldType)typeIndex;
+                string path = GetBuiltinTypeMenuPath(t);
+                bool selected = field.type == t && field.type != SupportableFieldType.Enum;
+                menu.AddItem(new GUIContent(path), selected, () =>
+                {
+                    field.type = t;
+                    field.enumTypeFullName = string.Empty;
+                    onSelected?.Invoke();
+                });
+            }
+
+            IReadOnlyList<string> enums = GetRegisteredEnumTypeFullNames();
+            string enumCat = UniConfigLoc.T("type_cat.enum");
+            if (enums.Count == 0 &&
+                !(field.IsEnum && !string.IsNullOrEmpty(field.enumTypeFullName)))
+            {
+                menu.AddDisabledItem(new GUIContent(enumCat + "/(" + UniConfigLoc.T("settings.enums") + ")"));
+            }
+            else
+            {
+                for (int i = 0; i < enums.Count; i++)
+                {
+                    string fullName = enums[i];
+                    if (string.IsNullOrWhiteSpace(fullName)) continue;
+                    string label = EnumTypeUtil.GetDisplayLabel(fullName);
+                    // 去掉 " (enum)" 后缀放进子菜单更干净
+                    if (label.EndsWith(" (enum)", StringComparison.Ordinal))
+                        label = label.Substring(0, label.Length - 7);
+                    bool selected = field.type == SupportableFieldType.Enum &&
+                                    string.Equals(field.enumTypeFullName, fullName, StringComparison.Ordinal);
+                    string captured = fullName;
+                    menu.AddItem(new GUIContent(enumCat + "/" + label), selected, () =>
+                    {
+                        field.type = SupportableFieldType.Enum;
+                        field.enumTypeFullName = captured;
+                        onSelected?.Invoke();
+                    });
+                }
+
+                // 当前字段用了未登记的孤儿枚举，仍显示可选中项
+                if (field.IsEnum && IndexOfEnum(enums, field.enumTypeFullName) < 0)
+                {
+                    string fullName = field.enumTypeFullName;
+                    string label = EnumTypeUtil.GetDisplayLabel(fullName);
+                    if (label.EndsWith(" (enum)", StringComparison.Ordinal))
+                        label = label.Substring(0, label.Length - 7);
+                    menu.AddItem(new GUIContent(enumCat + "/" + label), true, () => { });
+                }
+            }
+
+            menu.DropDown(activatorRect);
+        }
+
+        private static string GetBuiltinTypeMenuPath(SupportableFieldType type)
+        {
+            int index = (int)type;
+            string name = index >= 0 && index < DISPLAY_NAMES.Length ? DISPLAY_NAMES[index] : type.ToString();
+            string category;
+            if (index <= (int)SupportableFieldType.String)
+                category = UniConfigLoc.T("type_cat.scalar");
+            else if (index <= (int)SupportableFieldType.Array1D_Double)
+                category = UniConfigLoc.T("type_cat.array1d");
+            else if (index <= (int)SupportableFieldType.Array2D_Double)
+                category = UniConfigLoc.T("type_cat.array2d");
+            else
+                category = UniConfigLoc.T("type_cat.unity");
+            return category + "/" + name;
+        }
+
+        /// <summary>
+        /// 类型行下拉选项：内置类型 + 设置中登记的自定义枚举。
+        /// </summary>
+        public static string[] GetTypePopupOptions(ConfigField currentField = null)
+        {
+            IReadOnlyList<string> enums = GetRegisteredEnumTypeFullNames();
+            bool appendOrphan = currentField != null &&
+                                currentField.type == SupportableFieldType.Enum &&
+                                !string.IsNullOrEmpty(currentField.enumTypeFullName) &&
+                                IndexOfEnum(enums, currentField.enumTypeFullName) < 0;
+
+            var options = new string[BuiltinTypeCount + enums.Count + (appendOrphan ? 1 : 0)];
+            for (int i = 0; i < BuiltinTypeCount; i++)
+                options[i] = DISPLAY_NAMES[i];
+            for (int i = 0; i < enums.Count; i++)
+                options[BuiltinTypeCount + i] = EnumTypeUtil.GetDisplayLabel(enums[i]);
+            if (appendOrphan)
+                options[options.Length - 1] = EnumTypeUtil.GetDisplayLabel(currentField.enumTypeFullName);
+            return options;
+        }
+
+        public static int GetTypePopupIndex(ConfigField field, string[] options = null)
+        {
+            if (field == null) return 0;
+            if (field.type != SupportableFieldType.Enum)
+                return Mathf.Clamp((int)field.type, 0, BuiltinTypeCount - 1);
+
+            IReadOnlyList<string> enums = GetRegisteredEnumTypeFullNames();
+            int idx = IndexOfEnum(enums, field.enumTypeFullName);
+            if (idx >= 0)
+                return BuiltinTypeCount + idx;
+
+            // 孤儿枚举在 options 末尾
+            options ??= GetTypePopupOptions(field);
+            return Mathf.Max(0, options.Length - 1);
+        }
+
+        public static void ApplyTypePopupIndex(ConfigField field, int popupIndex)
+        {
+            if (field == null) return;
+            IReadOnlyList<string> enums = GetRegisteredEnumTypeFullNames();
+            if (popupIndex < BuiltinTypeCount)
+            {
+                field.type = (SupportableFieldType)popupIndex;
+                field.enumTypeFullName = string.Empty;
+                return;
+            }
+
+            int enumIndex = popupIndex - BuiltinTypeCount;
+            if (enumIndex >= 0 && enumIndex < enums.Count)
+            {
+                field.type = SupportableFieldType.Enum;
+                field.enumTypeFullName = enums[enumIndex];
+                return;
+            }
+
+            // 点选孤儿项：保持不变
+        }
+
+        private static int IndexOfEnum(IReadOnlyList<string> enums, string fullName)
+        {
+            if (enums == null || string.IsNullOrEmpty(fullName)) return -1;
+            for (int i = 0; i < enums.Count; i++)
+            {
+                if (string.Equals(enums[i], fullName, StringComparison.Ordinal))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// 将字段值转为真实对应的对象值
+        /// </summary>
+        public static object ToValue(string fieldValue, ConfigField field)
+        {
+            if (field == null) throw new ArgumentNullException(nameof(field));
+            if (field.type == SupportableFieldType.Enum)
+            {
+                try
+                {
+                    return EnumTypeUtil.ParseValue(field.enumTypeFullName, fieldValue);
+                }
+                catch (Exception ex)
+                {
+                    throw new FormatException(
+                        $"无法将 \"{fieldValue}\" 解析为枚举 {field.enumTypeFullName}: {ex.Message}", ex);
+                }
+            }
+
+            return ToValue(fieldValue, field.type);
         }
 
         /// <summary>
@@ -65,6 +303,9 @@ namespace UniConfig.Editor
         /// <param name="fieldType">字段类型</param>
         public static object ToValue(string fieldValue, SupportableFieldType fieldType)
         {
+            if (fieldType == SupportableFieldType.Enum)
+                throw new ArgumentException("枚举类型请使用 ToValue(string, ConfigField)", nameof(fieldType));
+
             if (string.IsNullOrWhiteSpace(fieldValue))
                 return GetDefaultValue(fieldType);
 

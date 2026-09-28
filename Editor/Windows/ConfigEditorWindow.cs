@@ -24,6 +24,12 @@ namespace UniConfig.Editor
 
         // 异步搜索
         private const double SearchDebounceSeconds = 0.2d;
+        private const string UiStateModuleKey = "UniConfig.UI.SelectedModule";
+        private const string UiStateTableKey = "UniConfig.UI.SelectedTable";
+        private const string UiStateExpandedKey = "UniConfig.UI.ExpandedModules";
+        private const string UiStatePageKey = "UniConfig.UI.DataPageIndex";
+        private const string UiStateTreeSearchKey = "UniConfig.UI.TreeSearch";
+        private const string UiStateDataSearchKey = "UniConfig.UI.DataSearch";
         private const string RenameControlName = "UniConfigTreeRename";
         private readonly HashSet<string> _columnsToDelete = new(StringComparer.Ordinal);
         private readonly HashSet<string> _expandedModules = new(StringComparer.Ordinal);
@@ -104,10 +110,22 @@ namespace UniConfig.Editor
         {
             EditorConfigMgr.EnsureLoaded();
             titleContent = Content("UniConfig", null, "ScriptableObject Icon", "d_ScriptableObject Icon");
+            // 域重载后延迟恢复，确保模块列表已就绪
+            EditorApplication.delayCall += RestoreUiStateAfterReload;
+        }
+
+        private void RestoreUiStateAfterReload()
+        {
+            // 窗口可能已关闭
+            if (this == null) return;
+            RestoreUiState();
+            Repaint();
         }
 
         private void OnDisable()
         {
+            PersistUiState();
+            EditorApplication.delayCall -= RestoreUiStateAfterReload;
             if (UniConfigEditorSettings.instance.autoSaveOnClose && _dirty)
                 try
                 {
@@ -118,6 +136,64 @@ namespace UniConfig.Editor
                 {
                     Debug.LogException(ex);
                 }
+        }
+
+        private void PersistUiState()
+        {
+            SessionState.SetString(UiStateModuleKey, _selectedModule ?? string.Empty);
+            SessionState.SetString(UiStateTableKey, _selectedTable ?? string.Empty);
+            SessionState.SetString(UiStateExpandedKey, string.Join("\n", _expandedModules));
+            SessionState.SetInt(UiStatePageKey, _dataPageIndex);
+            SessionState.SetString(UiStateTreeSearchKey, _treeSearch ?? string.Empty);
+            SessionState.SetString(UiStateDataSearchKey, _dataSearch ?? string.Empty);
+        }
+
+        private void RestoreUiState()
+        {
+            EditorConfigMgr.EnsureLoaded();
+
+            string expanded = SessionState.GetString(UiStateExpandedKey, string.Empty);
+            _expandedModules.Clear();
+            if (!string.IsNullOrEmpty(expanded))
+            {
+                string[] parts = expanded.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < parts.Length; i++)
+                    _expandedModules.Add(parts[i]);
+            }
+
+            _treeSearch = SessionState.GetString(UiStateTreeSearchKey, string.Empty);
+            _dataSearch = SessionState.GetString(UiStateDataSearchKey, string.Empty);
+
+            string moduleName = SessionState.GetString(UiStateModuleKey, string.Empty);
+            string tableName = SessionState.GetString(UiStateTableKey, string.Empty);
+            int page = SessionState.GetInt(UiStatePageKey, 0);
+
+            if (string.IsNullOrEmpty(moduleName))
+                return;
+
+            ConfigModule module = EditorConfigMgr.GetModule(moduleName);
+            if (module == null)
+                return;
+
+            _expandedModules.Add(moduleName);
+
+            if (!string.IsNullOrEmpty(tableName) && module.FindTable(tableName) != null)
+            {
+                // 直接恢复选中并加载，避免 SelectTable 把页码清零后再设
+                _selectedModule = moduleName;
+                _selectedTable = tableName;
+                _dataPageIndex = Mathf.Max(0, page);
+                _searchColumnsInitialized = false;
+                _visibleColumnsInitialized = false;
+                ClearGridFocus();
+                RequestLoadCurrentTable(module.FindTable(tableName));
+                MarkSearchDirty();
+            }
+            else
+            {
+                _selectedModule = moduleName;
+                _selectedTable = null;
+            }
         }
 
         private void OnGUI()
@@ -183,6 +259,7 @@ namespace UniConfig.Editor
                     "d_cs Script Icon"))
                 TryAction(() =>
                 {
+                    PersistUiState();
                     string path = EditorConfigMgr.GenerateCsharp();
                     _status = UniConfigLoc.F("status.generated", path);
                 });
@@ -190,6 +267,7 @@ namespace UniConfig.Editor
             if (ToolbarButton(UniConfigLoc.T("export"), UniConfigLoc.T("export.tip"), "Prefab Icon", "d_Prefab Icon"))
                 TryAction(() =>
                 {
+                    PersistUiState();
                     EditorConfigMgr.ExportConfigs();
                     _status = UniConfigLoc.T("status.exported");
                 });
@@ -388,6 +466,7 @@ namespace UniConfig.Editor
                         _expandedModules.Add(module.moduleName);
                     _selectedModule = module.moduleName;
                     _selectedTable = null;
+                    PersistUiState();
                 }
                 else
                 {
@@ -830,6 +909,7 @@ namespace UniConfig.Editor
                 return;
             _dataPageIndex = pageIndex;
             ClearGridFocus();
+            PersistUiState();
         }
 
         private static void ClearGridFocus()
@@ -880,7 +960,7 @@ namespace UniConfig.Editor
                 {
                     ConfigItem item = new();
                     foreach (ConfigField field in table.fields)
-                        item.SetValue(field.name, string.Empty);
+                        item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
                     table.items.Add(item);
                     table.cachedRowCount = table.items.Count;
                     ConstraintEvaluator.RecalculateRowFormulas(table, table.items.Count - 1);
@@ -1122,6 +1202,46 @@ namespace UniConfig.Editor
                             EditorGUI.TextField(fieldRect, item.GetValue(field.name), _cellStyle);
                             EditorGUI.EndDisabledGroup();
                         }
+                        else if (field.IsEnum)
+                        {
+                            string[] enumNames;
+                            try
+                            {
+                                enumNames = EnumTypeUtil.GetNames(field.enumTypeFullName);
+                            }
+                            catch (Exception ex)
+                            {
+                                EditorGUI.HelpBox(fieldRect, ex.Message, MessageType.Error);
+                                x += ColWidth;
+                                continue;
+                            }
+
+                            if (enumNames == null || enumNames.Length == 0)
+                            {
+                                EditorGUI.HelpBox(fieldRect, "enum empty", MessageType.Warning);
+                                x += ColWidth;
+                                continue;
+                            }
+
+                            string current = item.GetValue(field.name);
+                            int enumIndex = IndexOfName(enumNames, current);
+                            if (enumIndex < 0)
+                            {
+                                enumIndex = IndexOfName(enumNames, FieldUtils.GetDefaultCellString(field));
+                                if (enumIndex < 0) enumIndex = 0;
+                            }
+
+                            EditorGUI.BeginChangeCheck();
+                            int newEnumIndex = EditorGUI.Popup(fieldRect, enumIndex, enumNames);
+                            if (EditorGUI.EndChangeCheck() && newEnumIndex >= 0 && newEnumIndex < enumNames.Length)
+                            {
+                                item.SetValue(field.name, enumNames[newEnumIndex]);
+                                ConstraintEvaluator.RecalculateRowFormulas(table, row);
+                                table.MarkFkValidationDirty();
+                                ConstraintEvaluator.EnsureForeignKeyState(table);
+                                _dirty = true;
+                            }
+                        }
                         else
                         {
                             EditorGUI.BeginChangeCheck();
@@ -1198,12 +1318,26 @@ namespace UniConfig.Editor
                 ConfigField field = table.fields[fi];
                 Rect typeRect = new(x, y, ColWidth, RowHeight);
                 DrawCellBackground(typeRect, HeaderBg, true);
-                EditorGUI.BeginChangeCheck();
-                int newType = EditorGUI.Popup(Inset(typeRect, 1), (int)field.type, FieldUtils.DISPLAY_NAMES);
-                if (EditorGUI.EndChangeCheck())
+                Rect typeButtonRect = Inset(typeRect, 1);
+                if (EditorGUI.DropdownButton(
+                        typeButtonRect,
+                        new GUIContent(FieldUtils.GetTypeButtonLabel(field)),
+                        FocusType.Keyboard))
                 {
-                    field.type = (SupportableFieldType)newType;
-                    _dirty = true;
+                    ConfigField capturedField = field;
+                    ConfigTable capturedTable = table;
+                    FieldUtils.ShowTypeDropdownMenu(typeButtonRect, capturedField, () =>
+                    {
+                        string cellDefault = FieldUtils.GetDefaultCellString(capturedField);
+                        if (capturedTable.items != null)
+                        {
+                            for (int r = 0; r < capturedTable.items.Count; r++)
+                                capturedTable.items[r]?.SetValue(capturedField.name, cellDefault);
+                        }
+
+                        _dirty = true;
+                        Repaint();
+                    });
                 }
 
                 x += ColWidth;
@@ -1670,6 +1804,7 @@ namespace UniConfig.Editor
                 _expandedModules.Add(moduleName);
             }
 
+            PersistUiState();
             GUI.FocusControl(null);
             Repaint();
         }
@@ -1684,6 +1819,7 @@ namespace UniConfig.Editor
 
             ConfigTable table = EditorConfigMgr.GetModule(moduleName)?.FindTable(tableName);
             RequestLoadCurrentTable(table);
+            PersistUiState();
             Repaint();
         }
 
@@ -1692,7 +1828,19 @@ namespace UniConfig.Editor
             foreach (ConfigItem item in table.items)
             foreach (ConfigField field in table.fields)
                 if (!item.fieldData.ContainsKey(field.name))
-                    item.SetValue(field.name, string.Empty);
+                    item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
+        }
+
+        private static int IndexOfName(string[] names, string value)
+        {
+            if (names == null || string.IsNullOrEmpty(value)) return -1;
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (string.Equals(names[i], value, StringComparison.Ordinal))
+                    return i;
+            }
+
+            return -1;
         }
 
         private void AddField(ConfigTable table)
@@ -1708,7 +1856,7 @@ namespace UniConfig.Editor
 
             table.fields.Add(new ConfigField(name, SupportableFieldType.Int32));
             foreach (ConfigItem item in table.items)
-                item.SetValue(name, string.Empty);
+                item.SetValue(name, FieldUtils.GetDefaultCellString(table.fields[table.fields.Count - 1]));
             _searchColumns.Add(name);
             _visibleColumns.Add(name);
             _dirty = true;

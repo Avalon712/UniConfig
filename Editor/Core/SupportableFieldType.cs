@@ -43,6 +43,11 @@
         Vector2Int,
         Vector3Int,
         Color,
-        Color32
+        Color32,
+
+        /// <summary>
+        /// 自定义枚举（具体类型见 <see cref="ConfigField.enumTypeFullName"/>）。
+        /// </summary>
+        Enum
     }
 }

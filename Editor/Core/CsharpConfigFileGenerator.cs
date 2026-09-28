@@ -142,6 +142,13 @@ namespace UniConfig.Editor
                     throw new InvalidOperationException($"字段名不是合法 C# 标识符: {table.tableName}.{field.name}");
                 if (!names.Add(field.name))
                     throw new InvalidOperationException($"表 {table.tableName} 存在重复字段: {field.name}");
+                if (field.type == SupportableFieldType.Enum)
+                {
+                    if (string.IsNullOrEmpty(field.enumTypeFullName))
+                        throw new InvalidOperationException(
+                            $"表 {table.tableName} 字段 {field.name} 为枚举但未指定 enumTypeFullName");
+                    EnumTypeUtil.ResolveOrThrow(field.enumTypeFullName);
+                }
             }
         }
 
@@ -153,7 +160,7 @@ namespace UniConfig.Editor
 
             foreach (ConfigField field in table.fields)
                 sb.Append("        public readonly ")
-                    .Append(FieldUtils.GetCsharpTypeName(field.type))
+                    .Append(FieldUtils.GetCsharpTypeName(field))
                     .Append(' ')
                     .Append(field.name)
                     .AppendLine(";");
@@ -164,7 +171,7 @@ namespace UniConfig.Editor
             {
                 ConfigField field = table.fields[i];
                 if (i > 0) sb.Append(", ");
-                sb.Append(FieldUtils.GetCsharpTypeName(field.type)).Append(' ').Append(field.name);
+                sb.Append(FieldUtils.GetCsharpTypeName(field)).Append(' ').Append(field.name);
             }
 
             sb.AppendLine(")");

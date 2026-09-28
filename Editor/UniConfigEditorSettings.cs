@@ -1,5 +1,6 @@
 #region
 
+using System.Collections.Generic;
 using UnityEditor;
 
 #endregion
@@ -28,6 +29,11 @@ namespace UniConfig.Editor
         /// StreamingAssets 导出目录（相对项目根，须位于 Assets/StreamingAssets 下），文件名固定为 configs.bytes
         /// </summary>
         public string streamingAssetsExportDirectory = "Assets/StreamingAssets";
+
+        /// <summary>
+        /// 自定义枚举类型完整限定名列表（出现在字段类型下拉中）。
+        /// </summary>
+        public List<string> customEnumTypeFullNames = new();
 
         /// <summary>
         /// 窗口预设
