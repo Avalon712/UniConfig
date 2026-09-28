@@ -50,17 +50,13 @@ https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/Memor
 
 1. 打开 Unity：`Window` → `Package Manager`
 2. 左上角 `+` → `Add package from git URL...`
-3. 填入（指定版本标签）：
-
-```text
-https://github.com/Avalon712/UniConfig.git#v1.1.0
-```
-
-或安装最新默认分支：
+3. 填入：
 
 ```text
 https://github.com/Avalon712/UniConfig.git
 ```
+
+将跟踪仓库默认分支（`master`）最新提交。
 
 #### 方式二：manifest.json
 
@@ -70,7 +66,7 @@ https://github.com/Avalon712/UniConfig.git
 {
   "dependencies": {
     "com.cysharp.memorypack": "https://github.com/Avalon712/MemoryPackForUnity.git#1.21.4",
-    "org.avalon712.uniconfig": "https://github.com/Avalon712/UniConfig.git#v1.1.0"
+    "org.avalon712.uniconfig": "https://github.com/Avalon712/UniConfig.git"
   }
 }
 ```
