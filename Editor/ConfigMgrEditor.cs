@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 
 #endregion
@@ -11,77 +12,53 @@ namespace UniConfig.Editor
     /// <summary>
     /// 编辑器模式下的配置读取入口：从 <c>Config/</c> 下已保存的表数据构建实例，
     /// 不依赖导出的 <c>configs.bytes</c>。API 对齐 <see cref="ConfigMgr"/>。
+    /// 缓存由本类内部维护：Unity 打开时自动加载，配置保存后自动刷新。
     /// </summary>
     public static class ConfigMgrEditor
     {
         private static Dictionary<int, object> _configsById;
         private static Dictionary<Type, int> _typeToTableId;
         private static bool _loaded;
+        private static int _saveBatchDepth;
+        private static bool _refreshing;
 
-        public static bool IsLoaded => _loaded;
-
-        /// <summary>
-        /// 从编辑器磁盘数据加载全部表（会 EnsureLoaded 并按需拉表行）。
-        /// </summary>
-        public static void LoadAll()
+        [InitializeOnLoadMethod]
+        private static void AutoLoadOnEditorStartup()
         {
-            EditorConfigMgr.EnsureLoaded();
-
-            Dictionary<int, object> byId = new();
-            Dictionary<Type, int> typeMap = new();
-
-            foreach (ConfigModule module in EditorConfigMgr.Modules.Values)
+            // delayCall：避开编辑器启动早期其它 InitializeOnLoad 的顺序问题
+            EditorApplication.delayCall += () =>
             {
-                if (module?.tables == null) continue;
-                foreach (ConfigTable table in module.tables)
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 {
-                    if (table == null) continue;
-                    if (table.tableId <= 0)
-                        continue;
-                    if (table.fields == null || table.fields.Count == 0)
-                        continue;
-
-                    try
-                    {
-                        ExportTableData data = EditorConfigMgr.BuildExportTableData(table);
-                        List<object> rows = new(data.Count);
-                        for (int i = 0; i < data.Count; i++)
-                            rows.Add(data.GetObject(i));
-
-                        byId[data.TableId] = rows;
-                        if (data.ExportCsharpType != null)
-                            typeMap[data.ExportCsharpType] = data.TableId;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning(
-                            $"[UniConfig] ConfigMgrEditor 跳过表 {table.moduleName}/{table.tableName}: {ex.Message}");
-                    }
+                    EditorApplication.delayCall += RefreshCacheSafe;
+                    return;
                 }
-            }
 
-            _configsById = byId;
-            _typeToTableId = typeMap;
-            _loaded = true;
+                RefreshCacheSafe();
+            };
         }
 
         /// <summary>
-        /// 重新从磁盘读取模块元数据并加载全部表。
+        /// 由 <see cref="EditorConfigMgr"/> 在写入磁盘后调用；外部无需手动加载/卸载。
         /// </summary>
-        public static void Reload()
+        internal static void NotifyEditorDataChanged()
         {
-            EditorConfigMgr.Reload();
-            LoadAll();
+            if (_saveBatchDepth > 0)
+                return;
+            RefreshCacheSafe();
         }
 
-        /// <summary>
-        /// 清除内存缓存（不删磁盘数据）。
-        /// </summary>
-        public static void Unload()
+        internal static void BeginSaveBatch()
         {
-            _configsById = null;
-            _typeToTableId = null;
-            _loaded = false;
+            _saveBatchDepth++;
+        }
+
+        internal static void EndSaveBatch()
+        {
+            if (_saveBatchDepth > 0)
+                _saveBatchDepth--;
+            if (_saveBatchDepth == 0)
+                RefreshCacheSafe();
         }
 
         public static void PrintAllTables()
@@ -148,7 +125,68 @@ namespace UniConfig.Editor
         private static void EnsureLoaded()
         {
             if (!_loaded)
-                LoadAll();
+                RefreshCacheSafe();
+        }
+
+        private static void RefreshCacheSafe()
+        {
+            if (_refreshing)
+                return;
+            _refreshing = true;
+            try
+            {
+                RefreshCache();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UniConfig] ConfigMgrEditor 刷新失败: {ex.Message}");
+            }
+            finally
+            {
+                _refreshing = false;
+            }
+        }
+
+        private static void RefreshCache()
+        {
+            EditorConfigMgr.EnsureLoaded();
+
+            Dictionary<int, object> byId = new();
+            Dictionary<Type, int> typeMap = new();
+
+            foreach (ConfigModule module in EditorConfigMgr.Modules.Values)
+            {
+                if (module?.tables == null) continue;
+                foreach (ConfigTable table in module.tables)
+                {
+                    if (table == null) continue;
+                    if (table.tableId <= 0)
+                        continue;
+                    if (table.fields == null || table.fields.Count == 0)
+                        continue;
+
+                    try
+                    {
+                        ExportTableData data = EditorConfigMgr.BuildExportTableData(table);
+                        List<object> rows = new(data.Count);
+                        for (int i = 0; i < data.Count; i++)
+                            rows.Add(data.GetObject(i));
+
+                        byId[data.TableId] = rows;
+                        if (data.ExportCsharpType != null)
+                            typeMap[data.ExportCsharpType] = data.TableId;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning(
+                            $"[UniConfig] ConfigMgrEditor 跳过表 {table.moduleName}/{table.tableName}: {ex.Message}");
+                    }
+                }
+            }
+
+            _configsById = byId;
+            _typeToTableId = typeMap;
+            _loaded = true;
         }
 
         private static bool TryResolveTableId(Type mapCsharpType, out int tableId)
@@ -159,7 +197,6 @@ namespace UniConfig.Editor
             if (_typeToTableId != null && _typeToTableId.TryGetValue(mapCsharpType, out tableId) && tableId > 0)
                 return true;
 
-            // 按 FullName 回退（程序集不一致时 Type 引用不相等）
             if (_typeToTableId == null) return false;
             string fullName = mapCsharpType.FullName;
             foreach (KeyValuePair<Type, int> kv in _typeToTableId)

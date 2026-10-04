@@ -123,6 +123,7 @@ namespace UniConfig.Editor
             if (!_modules.Remove(moduleName))
                 return;
             ConfigRawStorage.DeleteModuleDirectory(moduleName);
+            ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
         public static ConfigTable CreateTable(string moduleName, string tableName)
@@ -159,6 +160,7 @@ namespace UniConfig.Editor
             module.tables.Remove(table);
             ConfigRawStorage.DeleteTableFile(moduleName, tableName);
             SaveModule(module);
+            ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
         public static void RenameTable(string moduleName, string oldName, string newName)
@@ -179,6 +181,8 @@ namespace UniConfig.Editor
             if (table.dataLoaded)
                 SaveTable(table);
             SaveModule(module);
+            if (!table.dataLoaded)
+                ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
         public static void RenameModule(string oldName, string newName)
@@ -206,9 +210,17 @@ namespace UniConfig.Editor
                 Directory.Move(oldDir, newDir);
 
             SaveModule(module);
-            foreach (ConfigTable table in module.tables)
-                if (table.dataLoaded)
-                    SaveTable(table);
+            ConfigMgrEditor.BeginSaveBatch();
+            try
+            {
+                foreach (ConfigTable table in module.tables)
+                    if (table.dataLoaded)
+                        SaveTable(table);
+            }
+            finally
+            {
+                ConfigMgrEditor.EndSaveBatch();
+            }
         }
 
         public static string GenerateUniqueModuleName(string baseName = "NewModule")
@@ -270,6 +282,8 @@ namespace UniConfig.Editor
 
             if (removed > 0)
                 Debug.Log($"[UniConfig] 保存 {table.moduleName}/{table.tableName} 时已跳过 {removed} 行空数据");
+
+            ConfigMgrEditor.NotifyEditorDataChanged();
             return removed;
         }
 
@@ -299,20 +313,28 @@ namespace UniConfig.Editor
         public static int SaveAll()
         {
             EnsureLoaded();
-            int removed = 0;
-            foreach (ConfigModule module in _modules.Values)
+            ConfigMgrEditor.BeginSaveBatch();
+            try
             {
-                foreach (ConfigTable table in module.tables)
+                int removed = 0;
+                foreach (ConfigModule module in _modules.Values)
                 {
-                    if (!table.dataLoaded)
-                        continue;
-                    removed += SaveTable(table, false);
+                    foreach (ConfigTable table in module.tables)
+                    {
+                        if (!table.dataLoaded)
+                            continue;
+                        removed += SaveTable(table, false);
+                    }
+
+                    SaveModule(module);
                 }
 
-                SaveModule(module);
+                return removed;
             }
-
-            return removed;
+            finally
+            {
+                ConfigMgrEditor.EndSaveBatch();
+            }
         }
 
         /// <summary>
