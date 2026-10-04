@@ -18,7 +18,7 @@ namespace UniConfig
     {
         private readonly IReadOnlyList<object> _cfgItems;
 
-        internal CfgTableIterator(IReadOnlyList<object> cfgItems)
+        public CfgTableIterator(IReadOnlyList<object> cfgItems)
         {
             _cfgItems = cfgItems ?? Array.Empty<object>();
         }
