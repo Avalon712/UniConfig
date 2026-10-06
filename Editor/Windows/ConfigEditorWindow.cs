@@ -21,6 +21,8 @@ namespace UniConfig.Editor
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
         private const float TreeItemHeight = 20f;
+        /// <summary>表格拉内容右侧留白，避免最大横向滚动时最后一列被垂直滚动条挡住。</summary>
+        private const float GridScrollPadX = 8f;
 
         // 异步搜索
         private const double SearchDebounceSeconds = 0.2d;
@@ -108,6 +110,7 @@ namespace UniConfig.Editor
 
         private void OnEnable()
         {
+            minSize = new Vector2(800, 360);
             EditorConfigMgr.EnsureLoaded();
             titleContent = Content("UniConfig", null, "ScriptableObject Icon", "d_ScriptableObject Icon");
             // 域重载后延迟恢复，确保模块列表已就绪
@@ -220,7 +223,7 @@ namespace UniConfig.Editor
         public static void Open()
         {
             ConfigEditorWindow window = GetWindow<ConfigEditorWindow>("UniConfig");
-            window.minSize = new Vector2(1000, 560);
+            window.minSize = new Vector2(800, 360);
             window.Show();
         }
 
@@ -1126,14 +1129,12 @@ namespace UniConfig.Editor
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
-            float gridWidth = IndexColWidth + visibleFieldIndices.Count * ColWidth + 20;
+            float gridWidth = GetSpreadsheetContentWidth(visibleFieldIndices.Count);
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
 
             _gridScroll = EditorGUILayout.BeginScrollView(_gridScroll, GUILayout.ExpandHeight(false),
                 GUILayout.Height(gridHeight + 8));
-            Rect content = GUILayoutUtility.GetRect(
-                Mathf.Max(gridWidth, position.width - TreePaneWidth - 40),
-                gridHeight);
+            Rect content = GUILayoutUtility.GetRect(gridWidth, gridHeight, GUILayout.ExpandWidth(false));
             DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, content.x, content.y, out _, out _);
             EditorGUILayout.EndScrollView();
         }
@@ -1146,7 +1147,7 @@ namespace UniConfig.Editor
                 EditorGUILayout.HelpBox(UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
 
             const float OpsRowHeight = 24f;
-            float gridWidth = IndexColWidth + visibleFieldIndices.Count * ColWidth + 20;
+            float gridWidth = GetSpreadsheetContentWidth(visibleFieldIndices.Count);
             List<int> matched = _displayRowIndices ?? new List<int>();
             int pageSize = ConfigPaths.ShardRowLimit;
             int pageCount = matched.Count == 0
@@ -1162,8 +1163,9 @@ namespace UniConfig.Editor
 
             _gridScroll = EditorGUILayout.BeginScrollView(_gridScroll, GUILayout.ExpandHeight(true));
             Rect content = GUILayoutUtility.GetRect(
-                Mathf.Max(gridWidth, position.width - TreePaneWidth - 40),
-                Mathf.Max(gridHeight, 200));
+                gridWidth,
+                Mathf.Max(gridHeight, 200),
+                GUILayout.ExpandWidth(false));
 
             float x0 = content.x;
             float y = content.y;
@@ -1268,6 +1270,16 @@ namespace UniConfig.Editor
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        /// <summary>
+        /// 表格内容区宽度：列总和 + 垂直滚动条宽度，确保横向滚到尽头时最后一列完全可见。
+        /// </summary>
+        private static float GetSpreadsheetContentWidth(int visibleColumnCount)
+        {
+            float vScroll = GUI.skin != null ? GUI.skin.verticalScrollbar.fixedWidth : 0f;
+            if (vScroll < 1f) vScroll = 16f;
+            return IndexColWidth + visibleColumnCount * ColWidth + vScroll + GridScrollPadX;
         }
 
         private void DrawSpreadsheetHeaderBlock(
