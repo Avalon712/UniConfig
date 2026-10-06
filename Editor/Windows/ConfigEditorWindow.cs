@@ -21,8 +21,8 @@ namespace UniConfig.Editor
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
         private const float TreeItemHeight = 20f;
-        /// <summary>表格拉内容右侧留白，避免最大横向滚动时最后一列被垂直滚动条挡住。</summary>
-        private const float GridScrollPadX = 8f;
+        /// <summary>表格内容右缘少量留白。</summary>
+        private const float GridScrollPadX = 4f;
 
         // 异步搜索
         private const double SearchDebounceSeconds = 0.2d;
@@ -1132,11 +1132,13 @@ namespace UniConfig.Editor
             float gridWidth = GetSpreadsheetContentWidth(visibleFieldIndices.Count);
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
 
-            _gridScroll = EditorGUILayout.BeginScrollView(_gridScroll, GUILayout.ExpandHeight(false),
-                GUILayout.Height(gridHeight + 8));
-            Rect content = GUILayoutUtility.GetRect(gridWidth, gridHeight, GUILayout.ExpandWidth(false));
-            DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, content.x, content.y, out _, out _);
-            EditorGUILayout.EndScrollView();
+            Rect view = GUILayoutUtility.GetRect(
+                0f, gridHeight + 8f,
+                GUILayout.ExpandWidth(true),
+                GUILayout.Height(gridHeight + 8f));
+            _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, gridHeight));
+            DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, 0f, 0f, out _, out _);
+            GUI.EndScrollView();
         }
 
         private void DrawSpreadsheet(ConfigTable table)
@@ -1160,15 +1162,17 @@ namespace UniConfig.Editor
             int visibleRows = Mathf.Max(0, pageEnd - pageStart);
 
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + visibleRows * RowHeight + 8;
+            float contentHeight = Mathf.Max(gridHeight, 200f);
 
-            _gridScroll = EditorGUILayout.BeginScrollView(_gridScroll, GUILayout.ExpandHeight(true));
-            Rect content = GUILayoutUtility.GetRect(
-                gridWidth,
-                Mathf.Max(gridHeight, 200),
-                GUILayout.ExpandWidth(false));
+            Rect view = GUILayoutUtility.GetRect(
+                0f, 0f,
+                GUILayout.ExpandWidth(true),
+                GUILayout.ExpandHeight(true));
+            // 显式 content 尺寸，避免 GUILayout ScrollView 在改宽/停靠 Tab 时把内容宽度压窄
+            _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, contentHeight));
 
-            float x0 = content.x;
-            float y = content.y;
+            const float x0 = 0f;
+            float y = 0f;
             DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, x0, y, out y, out bool columnOpsChanged);
 
             if (!columnOpsChanged)
@@ -1269,17 +1273,15 @@ namespace UniConfig.Editor
                 }
             }
 
-            EditorGUILayout.EndScrollView();
+            GUI.EndScrollView();
         }
 
         /// <summary>
-        /// 表格内容区宽度：列总和 + 垂直滚动条宽度，确保横向滚到尽头时最后一列完全可见。
+        /// 表格可滚动内容宽度（列总和 + 右缘留白）。滚动条由 <see cref="GUI.BeginScrollView"/> 单独占用视口，不再计入内容宽。
         /// </summary>
         private static float GetSpreadsheetContentWidth(int visibleColumnCount)
         {
-            float vScroll = GUI.skin != null ? GUI.skin.verticalScrollbar.fixedWidth : 0f;
-            if (vScroll < 1f) vScroll = 16f;
-            return IndexColWidth + visibleColumnCount * ColWidth + vScroll + GridScrollPadX;
+            return IndexColWidth + visibleColumnCount * ColWidth + GridScrollPadX;
         }
 
         private void DrawSpreadsheetHeaderBlock(
