@@ -736,7 +736,9 @@ namespace UniConfig.Editor
 
         private void DrawDataPane()
         {
-            EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+            // 固定为窗口剩余宽度：否则工具栏的最小宽度会把整个数据区撑出窗口，表格视口右侧被裁掉
+            float paneWidth = Mathf.Max(0f, position.width - TreePaneWidth - 1f);
+            EditorGUILayout.BeginVertical(GUILayout.Width(paneWidth));
 
             ConfigModule module = CurrentModule();
             ConfigTable table = CurrentTable();
@@ -931,7 +933,7 @@ namespace UniConfig.Editor
             string idText = table.tableId > 0 ? table.tableId.ToString() : "-";
             GUILayout.Label(
                 $"{module.moduleName}/{table.tableName} (Id={idText}, {UniConfigLoc.T("export_type")}: {exportClass})",
-                EditorStyles.boldLabel);
+                EditorStyles.boldLabel, GUILayout.MinWidth(0f), GUILayout.ExpandWidth(true));
 
             if (ToolbarButton(UniConfigLoc.T("rename"), UniConfigLoc.T("rename_table.tip"), "editicon.sml",
                     "d_editicon.sml"))
