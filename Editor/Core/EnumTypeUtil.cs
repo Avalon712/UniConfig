@@ -161,43 +161,30 @@ namespace UniConfig.Editor
             Type direct = Type.GetType(fullName);
             if (direct != null) return direct;
 
-            // 兼容嵌套枚举：C# 名 Namespace.Outer.Inner ↔ CLR FullName Namespace.Outer+Inner
-            string plusName = null;
-            int lastDot = fullName.LastIndexOf('.');
-            if (lastDot > 0)
-                plusName = fullName.Substring(0, lastDot) + "+" + fullName.Substring(lastDot + 1);
-
+            // Unity 模块类型（如 UnityEngine.HumanBodyBones）不在 UnityEngine.dll，
+            // Type.GetType(短名) 找不到，必须扫已加载程序集。
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (assembly.IsDynamic) continue;
-                string name;
-                try { name = assembly.GetName().Name; }
-                catch { continue; }
-                if (string.IsNullOrEmpty(name)) continue;
-                if (name.StartsWith("UnityEngine", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith("UnityEditor", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith("Unity.", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith("System", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "mscorlib", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "netstandard", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                Type type = assembly.GetType(fullName);
+                Type type = TryGetType(assembly, fullName);
                 if (type != null) return type;
-                if (plusName != null)
-                {
-                    type = assembly.GetType(plusName);
-                    if (type != null) return type;
-                }
+            }
 
-                // 多层嵌套：逐步把末尾的点换成 +
-                for (int i = fullName.Length - 1; i >= 0; i--)
-                {
-                    if (fullName[i] != '.') continue;
-                    string candidate = fullName.Substring(0, i) + "+" + fullName.Substring(i + 1).Replace('.', '+');
-                    type = assembly.GetType(candidate);
-                    if (type != null) return type;
-                }
+            return null;
+        }
+
+        private static Type TryGetType(Assembly assembly, string fullName)
+        {
+            Type type = assembly.GetType(fullName);
+            if (type != null) return type;
+
+            // 兼容嵌套枚举：C# 名 Namespace.Outer.Inner ↔ CLR FullName Namespace.Outer+Inner
+            for (int i = fullName.Length - 1; i >= 0; i--)
+            {
+                if (fullName[i] != '.') continue;
+                string candidate = fullName.Substring(0, i) + "+" + fullName.Substring(i + 1).Replace('.', '+');
+                type = assembly.GetType(candidate);
+                if (type != null) return type;
             }
 
             return null;
