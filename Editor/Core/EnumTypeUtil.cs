@@ -12,12 +12,14 @@ namespace UniConfig.Editor
         private static readonly Dictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, string[]> NamesCache = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, string> DefaultNameCache = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, bool> FlagsCache = new(StringComparer.Ordinal);
 
         public static void ClearCache()
         {
             TypeCache.Clear();
             NamesCache.Clear();
             DefaultNameCache.Clear();
+            FlagsCache.Clear();
         }
 
         public static bool TryResolve(string typeFullName, out Type enumType, out string error)
@@ -57,6 +59,22 @@ namespace UniConfig.Editor
             if (!TryResolve(typeFullName, out Type enumType, out string error))
                 throw new TypeLoadException(error);
             return enumType;
+        }
+
+        /// <summary>
+        /// 类型是否带 <see cref="FlagsAttribute"/>。带标记的枚举在表格里用多选编辑。
+        /// </summary>
+        public static bool IsFlags(string typeFullName)
+        {
+            if (string.IsNullOrEmpty(typeFullName))
+                return false;
+            if (FlagsCache.TryGetValue(typeFullName, out bool cached))
+                return cached;
+
+            Type enumType = ResolveOrThrow(typeFullName);
+            bool flags = enumType.IsDefined(typeof(FlagsAttribute), false);
+            FlagsCache[typeFullName] = flags;
+            return flags;
         }
 
         public static string[] GetNames(string typeFullName)
@@ -117,6 +135,7 @@ namespace UniConfig.Editor
             string text = raw.Trim();
             try
             {
+                // Flags 组合存成 "A, B"，Enum.Parse 可直接还原
                 return Enum.Parse(enumType, text, ignoreCase: true);
             }
             catch (ArgumentException)
@@ -141,7 +160,11 @@ namespace UniConfig.Editor
             int dot = typeFullName.LastIndexOf('.');
             string shortName = dot >= 0 ? typeFullName.Substring(dot + 1) : typeFullName;
             // Outer+Inner → Outer.Inner 显示
-            return shortName.Replace('+', '.') + " (enum)";
+            string suffix = " (enum)";
+            if (TryResolve(typeFullName, out Type enumType, out _) &&
+                enumType.IsDefined(typeof(FlagsAttribute), false))
+                suffix = " (flags)";
+            return shortName.Replace('+', '.') + suffix;
         }
 
         private static string BuildCsharpTypeName(Type type)

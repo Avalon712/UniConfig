@@ -1212,42 +1212,10 @@ namespace UniConfig.Editor
                         }
                         else if (field.IsEnum)
                         {
-                            string[] enumNames;
-                            try
+                            if (!DrawEnumCell(fieldRect, table, row, field, item))
                             {
-                                enumNames = EnumTypeUtil.GetNames(field.enumTypeFullName);
-                            }
-                            catch (Exception ex)
-                            {
-                                EditorGUI.HelpBox(fieldRect, ex.Message, MessageType.Error);
                                 x += ColWidth;
                                 continue;
-                            }
-
-                            if (enumNames == null || enumNames.Length == 0)
-                            {
-                                EditorGUI.HelpBox(fieldRect, "enum empty", MessageType.Warning);
-                                x += ColWidth;
-                                continue;
-                            }
-
-                            string current = item.GetValue(field.name);
-                            int enumIndex = IndexOfName(enumNames, current);
-                            if (enumIndex < 0)
-                            {
-                                enumIndex = IndexOfName(enumNames, FieldUtils.GetDefaultCellString(field));
-                                if (enumIndex < 0) enumIndex = 0;
-                            }
-
-                            EditorGUI.BeginChangeCheck();
-                            int newEnumIndex = EditorGUI.Popup(fieldRect, enumIndex, enumNames);
-                            if (EditorGUI.EndChangeCheck() && newEnumIndex >= 0 && newEnumIndex < enumNames.Length)
-                            {
-                                item.SetValue(field.name, enumNames[newEnumIndex]);
-                                ConstraintEvaluator.RecalculateRowFormulas(table, row);
-                                table.MarkFkValidationDirty();
-                                ConstraintEvaluator.EnsureForeignKeyState(table);
-                                _dirty = true;
                             }
                         }
                         else
@@ -1845,6 +1813,83 @@ namespace UniConfig.Editor
             foreach (ConfigField field in table.fields)
                 if (!item.fieldData.ContainsKey(field.name))
                     item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
+        }
+
+        /// <returns>绘制成功返回 true；类型无效时已画出错误提示并返回 false。</returns>
+        private bool DrawEnumCell(Rect fieldRect, ConfigTable table, int row, ConfigField field, ConfigItem item)
+        {
+            if (!EnumTypeUtil.TryResolve(field.enumTypeFullName, out _, out string enumError))
+            {
+                EditorGUI.HelpBox(fieldRect, enumError, MessageType.Error);
+                return false;
+            }
+
+            string current = item.GetValue(field.name);
+            if (EnumTypeUtil.IsFlags(field.enumTypeFullName))
+            {
+                Enum currentEnum;
+                try
+                {
+                    currentEnum = (Enum)EnumTypeUtil.ParseValue(field.enumTypeFullName, current);
+                }
+                catch (Exception ex)
+                {
+                    EditorGUI.HelpBox(fieldRect, ex.Message, MessageType.Error);
+                    return false;
+                }
+
+                EditorGUI.BeginChangeCheck();
+                Enum next = EditorGUI.EnumFlagsField(fieldRect, currentEnum);
+                if (EditorGUI.EndChangeCheck() && !Equals(next, currentEnum))
+                {
+                    item.SetValue(field.name, next.ToString());
+                    OnEnumCellChanged(table, row);
+                }
+
+                return true;
+            }
+
+            string[] enumNames;
+            try
+            {
+                enumNames = EnumTypeUtil.GetNames(field.enumTypeFullName);
+            }
+            catch (Exception ex)
+            {
+                EditorGUI.HelpBox(fieldRect, ex.Message, MessageType.Error);
+                return false;
+            }
+
+            if (enumNames == null || enumNames.Length == 0)
+            {
+                EditorGUI.HelpBox(fieldRect, "enum empty", MessageType.Warning);
+                return false;
+            }
+
+            int enumIndex = IndexOfName(enumNames, current);
+            if (enumIndex < 0)
+            {
+                enumIndex = IndexOfName(enumNames, FieldUtils.GetDefaultCellString(field));
+                if (enumIndex < 0) enumIndex = 0;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            int newEnumIndex = EditorGUI.Popup(fieldRect, enumIndex, enumNames);
+            if (EditorGUI.EndChangeCheck() && newEnumIndex >= 0 && newEnumIndex < enumNames.Length)
+            {
+                item.SetValue(field.name, enumNames[newEnumIndex]);
+                OnEnumCellChanged(table, row);
+            }
+
+            return true;
+        }
+
+        private void OnEnumCellChanged(ConfigTable table, int row)
+        {
+            ConstraintEvaluator.RecalculateRowFormulas(table, row);
+            table.MarkFkValidationDirty();
+            ConstraintEvaluator.EnsureForeignKeyState(table);
+            _dirty = true;
         }
 
         private static int IndexOfName(string[] names, string value)
