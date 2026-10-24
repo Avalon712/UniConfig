@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -123,6 +124,7 @@ namespace UniConfig.Editor
             if (!_modules.Remove(moduleName))
                 return;
             ConfigRawStorage.DeleteModuleDirectory(moduleName);
+            UniConfigEditorSettings.instance.RemoveVisibleColumnsForModule(moduleName);
             ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
@@ -145,6 +147,7 @@ namespace UniConfig.Editor
                 cachedRowCount = 0
             };
             module.tables.Add(table);
+            EnsureAutoRowId(table);
             SaveModule(module);
             SaveTable(table);
             return table;
@@ -160,6 +163,7 @@ namespace UniConfig.Editor
             module.tables.Remove(table);
             ConfigRawStorage.DeleteTableFile(moduleName, tableName);
             SaveModule(module);
+            UniConfigEditorSettings.instance.RemoveVisibleColumns(moduleName, tableName);
             ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
@@ -181,6 +185,7 @@ namespace UniConfig.Editor
             if (table.dataLoaded)
                 SaveTable(table);
             SaveModule(module);
+            UniConfigEditorSettings.instance.RenameVisibleColumnsTable(moduleName, oldName, newName);
             if (!table.dataLoaded)
                 ConfigMgrEditor.NotifyEditorDataChanged();
         }
@@ -209,6 +214,7 @@ namespace UniConfig.Editor
             if (Directory.Exists(oldDir))
                 Directory.Move(oldDir, newDir);
 
+            UniConfigEditorSettings.instance.RenameVisibleColumnsModule(oldName, newName);
             SaveModule(module);
             ConfigMgrEditor.BeginSaveBatch();
             try
@@ -270,6 +276,7 @@ namespace UniConfig.Editor
                 throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 数据尚未加载，无法保存");
 
             int removed = RemoveEmptyItems(table);
+            EnsureAutoRowId(table);
             ConfigRawStorage.SaveTable(table);
             table.cachedRowCount = table.items.Count;
 
@@ -335,6 +342,84 @@ namespace UniConfig.Editor
             {
                 ConfigMgrEditor.EndSaveBatch();
             }
+        }
+
+        /// <summary>
+        /// 勾选「自动创建 id 字段」后，为全部表补上 id 并把值矫正为当前行号，然后保存。
+        /// </summary>
+        public static void ApplyAutoRowIds()
+        {
+            if (!UniConfigEditorSettings.instance.autoRowIdField)
+                return;
+
+            EnsureLoaded();
+            ConfigMgrEditor.BeginSaveBatch();
+            try
+            {
+                foreach (ConfigModule module in _modules.Values)
+                {
+                    if (module?.tables == null) continue;
+                    foreach (ConfigTable table in module.tables)
+                    {
+                        if (table == null) continue;
+                        EnsureTableDataLoaded(table);
+                        if (!table.dataLoaded) continue;
+                        EnsureAutoRowId(table);
+                        SaveTable(table);
+                    }
+                }
+            }
+            finally
+            {
+                ConfigMgrEditor.EndSaveBatch();
+            }
+        }
+
+        /// <summary>
+        /// 设置开启时保证表含有 int 字段 id，且每一行的值等于行号（从 1 开始）。
+        /// </summary>
+        /// <returns>字段结构或单元格是否发生变化</returns>
+        public static bool EnsureAutoRowId(ConfigTable table)
+        {
+            if (table == null || !UniConfigEditorSettings.instance.autoRowIdField)
+                return false;
+
+            table.fields ??= new List<ConfigField>();
+            bool changed = false;
+            int index = table.GetFieldIndex(UniConfigEditorSettings.AutoRowIdFieldName);
+            if (index < 0)
+            {
+                table.fields.Insert(0, new ConfigField(UniConfigEditorSettings.AutoRowIdFieldName,
+                    SupportableFieldType.Int32));
+                changed = true;
+            }
+            else
+            {
+                ConfigField field = table.fields[index];
+                if (field.type != SupportableFieldType.Int32 || !string.IsNullOrEmpty(field.enumTypeFullName))
+                {
+                    field.type = SupportableFieldType.Int32;
+                    field.enumTypeFullName = string.Empty;
+                    changed = true;
+                }
+            }
+
+            if (table.items == null)
+                return changed;
+
+            for (int i = 0; i < table.items.Count; i++)
+            {
+                ConfigItem item = table.items[i];
+                if (item == null) continue;
+                string expect = (i + 1).ToString(CultureInfo.InvariantCulture);
+                if (string.Equals(item.GetValue(UniConfigEditorSettings.AutoRowIdFieldName), expect,
+                        StringComparison.Ordinal))
+                    continue;
+                item.SetValue(UniConfigEditorSettings.AutoRowIdFieldName, expect);
+                changed = true;
+            }
+
+            return changed;
         }
 
         /// <summary>
@@ -562,6 +647,7 @@ namespace UniConfig.Editor
         {
             if (table == null) throw new ArgumentNullException(nameof(table));
             EnsureTableDataLoaded(table);
+            EnsureAutoRowId(table);
             if (table.fields == null || table.fields.Count == 0)
                 throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 没有字段");
 

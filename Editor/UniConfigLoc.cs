@@ -169,6 +169,17 @@ namespace UniConfig.Editor
             },
             ["settings.editor"] = new[] { "编辑器", "Editor" },
             ["settings.auto_save_close"] = new[] { "关闭时自动保存", "Auto-save on close" },
+            ["settings.auto_row_id"] = new[] { "自动创建 id 字段", "Auto-create id field" },
+            ["settings.auto_row_id_hint"] = new[]
+            {
+                "每张表会有 int 字段 id，值等于行号（从 1 开始，与 # 列一致），不可编辑。该列默认不在表格中显示，可在「显示列」里打开。每张表的显示列选择会被记住。",
+                "Each table gets an int field named id. Its value is the row number (1-based, same as the # column) and cannot be edited. The column is hidden by default; turn it on in Visible Cols. Visible column choices are remembered per table."
+            },
+            ["delete_col.id_locked"] = new[]
+            {
+                "id 列由「自动创建 id 字段」管理，不能删除。",
+                "The id column is managed by Auto-create id field and cannot be deleted."
+            },
             ["settings.open_editor"] = new[] { "打开配置编辑器", "Open Config Editor" },
 
             // 约束

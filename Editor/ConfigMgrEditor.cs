@@ -94,6 +94,23 @@ namespace UniConfig.Editor
             return new CfgTableIterator<T>(Array.Empty<object>());
         }
 
+        /// <summary>
+        /// 按行号取得一条配置。这里的 Id 是表的行号，从 1 开始，与编辑器中的 # 列一致，不是表的 tableId。
+        /// </summary>
+        public static T GetConfigById<T>(int id) where T : IConfigTable
+        {
+            if (id <= 0) return default;
+            int row = 0;
+            foreach (T config in GetConfigs<T>())
+            {
+                row++;
+                if (row == id)
+                    return config;
+            }
+
+            return default;
+        }
+
         public static T GetConfig<T>(Predicate<T> condition) where T : IConfigTable
         {
             if (condition == null) return default;

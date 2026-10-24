@@ -91,6 +91,7 @@ https://github.com/Avalon712/UniConfig.git
 | Resources 导出目录       | `ResourcesExporter` 输出目录       | `Assets/Resources`       |
 | StreamingAssets 导出目录 | `StreamingAssetsExporter` 输出目录 | `Assets/StreamingAssets` |
 | 自定义枚举类型              | 完整类型名列表（`List`），会出现在字段类型菜单中    | （空）                      |
+| 自动创建 id 字段           | 每张表自动维护 `id`（int，值=行号，从 1 开始）   | 关                        |
 
 导出文件名固定为 **`configs.bytes`**。
 
@@ -168,6 +169,15 @@ https://github.com/Avalon712/UniConfig.git
 2. 配置表字段类型使用**分级菜单**选择（见下）。普通枚举单元格为**单选下拉**；带 `[Flags]` 的枚举为**多选**（类型菜单中标为 `(flags)`）。
 3. 单元格存成员名（如 `Fire`）。Flags 多选存组合名（如 `Fire, Ice`），导出为对应的按位或整数值。默认值为底层数值**最小**的成员（不必从 0 开始）。
 4. 生成的 C# 字段类型为该枚举的完整类型名；MemoryPack 可直接序列化枚举。
+
+#### 自动 id（行号）
+
+在 Settings 中勾选 **自动创建 id 字段** 后：
+
+- 每张表自动有 `int id`，值等于当前行号（从 1 开始，与编辑器 `#` 列一致），不可手改；增删行或保存时会重新矫正。
+- 该列默认不显示，用工具栏 **显示列** 打开。每张表的显示列选择会保存，下次打开编辑器仍恢复。
+- 运行时用 `ConfigMgr.GetConfigById<T>(行号)` 取值。这个 Id 是行号，不是表的 `tableId`。
+- 勾选后需要重新 **生成 C#**，已有配置类才会带上 `id` 字段。
 
 #### 字段类型分级菜单
 
@@ -247,6 +257,9 @@ foreach (CfgSkill skill in ConfigMgr.GetConfigs<CfgSkill>())
 {
     Debug.Log(skill); // 生成类已重写 ToString
 }
+
+// 按行号取一条。Id 是表的行号（从 1 开始），不是 tableId。
+CfgSkill first = ConfigMgr.GetConfigById<CfgSkill>(1);
 
 // 取第一条匹配
 CfgSkill one = ConfigMgr.GetConfig<CfgSkill>(s => s.id == 1001);

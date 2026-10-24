@@ -109,6 +109,11 @@ namespace UniConfig.Editor
             EditorGUILayout.LabelField(UniConfigLoc.T("settings.editor"), EditorStyles.boldLabel);
             settings.autoSaveOnClose =
                 EditorGUILayout.Toggle(UniConfigLoc.T("settings.auto_save_close"), settings.autoSaveOnClose);
+            bool prevAutoRowId = settings.autoRowIdField;
+            settings.autoRowIdField =
+                EditorGUILayout.Toggle(UniConfigLoc.T("settings.auto_row_id"), settings.autoRowIdField);
+            if (settings.autoRowIdField)
+                EditorGUILayout.HelpBox(UniConfigLoc.T("settings.auto_row_id_hint"), MessageType.Info);
             settings.editorLanguage = EditorGUILayout.Popup(
                 UniConfigLoc.T("language"),
                 settings.editorLanguage,
@@ -122,6 +127,8 @@ namespace UniConfig.Editor
             {
                 NormalizeEnumTypes(settings, removeEmpty: false);
                 settings.SaveSettings();
+                if (!prevAutoRowId && settings.autoRowIdField)
+                    TryApplyAutoRowIds();
                 Repaint();
             }
 
@@ -144,6 +151,19 @@ namespace UniConfig.Editor
         /// <summary>
         /// Trim + 非空去重。removeEmpty=false 时保留空槽，保证点 + 能看到新行。
         /// </summary>
+        private static void TryApplyAutoRowIds()
+        {
+            try
+            {
+                EditorConfigMgr.ApplyAutoRowIds();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                EditorUtility.DisplayDialog("UniConfig", ex.Message, UniConfigLoc.T("ok"));
+            }
+        }
+
         private static void NormalizeEnumTypes(UniConfigEditorSettings settings, bool removeEmpty)
         {
             settings.customEnumTypeFullNames ??= new List<string>();

@@ -34,8 +34,14 @@ namespace UniConfig.Editor
             if (fields != null && fields.Count > 0)
             {
                 for (int i = 0; i < fields.Count; i++)
+                {
+                    // 自动行号不算有效内容，否则空行会因为 id 永远无法被保存时跳过
+                    if (UniConfigEditorSettings.instance.IsAutoRowIdField(fields[i].name))
+                        continue;
                     if (!string.IsNullOrWhiteSpace(GetValue(fields[i].name)))
                         return false;
+                }
+
                 return true;
             }
 

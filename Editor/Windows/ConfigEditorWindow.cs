@@ -771,6 +771,11 @@ namespace UniConfig.Editor
             }
 
             SyncColumnSelections(table);
+            if (EditorConfigMgr.EnsureAutoRowId(table))
+            {
+                _dirty = true;
+                _searchColumns.Add(UniConfigEditorSettings.AutoRowIdFieldName);
+            }
             ConstraintEvaluator.EnsureForeignKeyState(table);
             DrawDataToolbar(module, table);
             TickAsyncSearch(table);
@@ -968,6 +973,7 @@ namespace UniConfig.Editor
                         item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
                     table.items.Add(item);
                     table.cachedRowCount = table.items.Count;
+                    EditorConfigMgr.EnsureAutoRowId(table);
                     ConstraintEvaluator.RecalculateRowFormulas(table, table.items.Count - 1);
                     _dataPageIndex = Mathf.Max(0, (table.items.Count - 1) / ConfigPaths.ShardRowLimit);
                     _dirty = true;
@@ -991,7 +997,8 @@ namespace UniConfig.Editor
             EditorGUI.BeginChangeCheck();
             DrawColumnMaskField(UniConfigLoc.T("search_cols"), table, _searchColumns, true);
             bool searchColumnsChanged = EditorGUI.EndChangeCheck();
-            DrawColumnMaskField(UniConfigLoc.T("visible_cols"), table, _visibleColumns, true);
+            if (DrawColumnMaskField(UniConfigLoc.T("visible_cols"), table, _visibleColumns, true))
+                SaveVisibleColumns(table);
 
             if (searchTextChanged || searchColumnsChanged)
                 MarkSearchDirty();
@@ -1049,6 +1056,7 @@ namespace UniConfig.Editor
 
             table.items.RemoveAt(oneBasedIndex - 1);
             table.cachedRowCount = table.items.Count;
+            EditorConfigMgr.EnsureAutoRowId(table);
             _deleteRowInput = string.Empty;
             _dirty = true;
             _status = UniConfigLoc.F("status.row_deleted", oneBasedIndex);
@@ -1071,9 +1079,11 @@ namespace UniConfig.Editor
             }
 
             List<string> names = _columnsToDelete.Where(n => table.GetFieldIndex(n) >= 0).ToList();
+            bool blockedAutoId = names.RemoveAll(n => UniConfigEditorSettings.instance.IsAutoRowIdField(n)) > 0;
             if (names.Count == 0)
             {
-                EditorUtility.DisplayDialog(UniConfigLoc.T("delete_col.title"), UniConfigLoc.T("delete_col.none"),
+                EditorUtility.DisplayDialog(UniConfigLoc.T("delete_col.title"),
+                    UniConfigLoc.T(blockedAutoId ? "delete_col.id_locked" : "delete_col.none"),
                     UniConfigLoc.T("ok"));
                 return;
             }
@@ -1094,13 +1104,14 @@ namespace UniConfig.Editor
 
             _dirty = true;
             _status = UniConfigLoc.F("status.cols_deleted", names.Count);
+            SaveVisibleColumns(table);
             MarkSearchDirty();
         }
 
         /// <summary>
         /// 使用 Unity 原生 MaskField 做列多选。单独标签 + 无 toolbar 样式，避免下拉失效。
         /// </summary>
-        private static void DrawColumnMaskField(string label, ConfigTable table, HashSet<string> selected,
+        private static bool DrawColumnMaskField(string label, ConfigTable table, HashSet<string> selected,
             bool defaultSelectAllAsEverything)
         {
             if (!string.IsNullOrEmpty(label))
@@ -1111,7 +1122,7 @@ namespace UniConfig.Editor
                 EditorGUI.BeginDisabledGroup(true);
                 EditorGUILayout.MaskField(0, new[] { UniConfigLoc.T("no_fields") }, GUILayout.Width(110));
                 EditorGUI.EndDisabledGroup();
-                return;
+                return false;
             }
 
             string[] columnNames = new string[table.fields.Count];
@@ -1122,8 +1133,10 @@ namespace UniConfig.Editor
             EditorGUI.BeginChangeCheck();
             // 不用 EditorStyles.toolbarPopup：该样式会导致 MaskField 下拉异常
             int newMask = EditorGUILayout.MaskField(mask, columnNames, GUILayout.Width(110));
-            if (EditorGUI.EndChangeCheck())
-                ApplyColumnMask(table, selected, newMask);
+            if (!EditorGUI.EndChangeCheck())
+                return false;
+            ApplyColumnMask(table, selected, newMask);
+            return true;
         }
 
         private void DrawSpreadsheetHeadersOnly(ConfigTable table)
@@ -1203,9 +1216,10 @@ namespace UniConfig.Editor
                         DrawCellBackground(cell, fkError ? FkErrorCell : rowBg, true);
                         Rect fieldRect = Inset(cell, 1);
                         bool formulaLocked = ConstraintEvaluator.IsFormulaField(table, field.name);
-                        if (formulaLocked)
+                        bool autoRowId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
+                        if (formulaLocked || autoRowId)
                         {
-                            // 公式字段只读，由约束自动计算
+                            // 公式字段、自动行号只读
                             EditorGUI.BeginDisabledGroup(true);
                             EditorGUI.TextField(fieldRect, item.GetValue(field.name), _cellStyle);
                             EditorGUI.EndDisabledGroup();
@@ -1275,9 +1289,22 @@ namespace UniConfig.Editor
                 ConfigField field = table.fields[fi];
                 Rect nameRect = new(x, y, ColWidth, HeaderRowHeight);
                 DrawCellBackground(nameRect, HeaderBg, true);
+                bool lockAutoId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
                 EditorGUI.BeginChangeCheck();
-                string newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
-                if (EditorGUI.EndChangeCheck())
+                string newName;
+                if (lockAutoId)
+                {
+                    EditorGUI.BeginDisabledGroup(true);
+                    newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
+                    EditorGUI.EndDisabledGroup();
+                }
+                else
+                {
+                    newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
+                }
+
+                bool nameChanged = EditorGUI.EndChangeCheck();
+                if (!lockAutoId && nameChanged)
                     if (newName != field.name && FieldUtils.IsValidIdentifier(newName) &&
                         table.GetFieldIndex(newName) < 0)
                     {
@@ -1303,6 +1330,16 @@ namespace UniConfig.Editor
                 Rect typeRect = new(x, y, ColWidth, RowHeight);
                 DrawCellBackground(typeRect, HeaderBg, true);
                 Rect typeButtonRect = Inset(typeRect, 1);
+                if (UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
+                {
+                    EditorGUI.BeginDisabledGroup(true);
+                    EditorGUI.DropdownButton(typeButtonRect,
+                        new GUIContent(FieldUtils.GetTypeButtonLabel(field)), FocusType.Passive);
+                    EditorGUI.EndDisabledGroup();
+                    x += ColWidth;
+                    continue;
+                }
+
                 if (EditorGUI.DropdownButton(
                         typeButtonRect,
                         new GUIContent(FieldUtils.GetTypeButtonLabel(field)),
@@ -1628,14 +1665,34 @@ namespace UniConfig.Editor
             _visibleColumns.Clear();
             _columnsToDelete.Clear();
             foreach (ConfigField field in table.fields)
-            {
                 _searchColumns.Add(field.name);
-                _visibleColumns.Add(field.name);
+
+            UniConfigEditorSettings settings = UniConfigEditorSettings.instance;
+            if (settings.TryGetVisibleColumns(table.moduleName, table.tableName, out List<string> saved))
+            {
+                foreach (string name in saved)
+                    if (table.GetFieldIndex(name) >= 0)
+                        _visibleColumns.Add(name);
+            }
+            else
+            {
+                foreach (ConfigField field in table.fields)
+                    if (!settings.IsAutoRowIdField(field.name))
+                        _visibleColumns.Add(field.name);
+                if (table.fields != null && table.fields.Count > 0)
+                    SaveVisibleColumns(table);
             }
 
             _deleteRowInput = string.Empty;
             _searchColumnsInitialized = true;
             _visibleColumnsInitialized = true;
+        }
+
+        private void SaveVisibleColumns(ConfigTable table)
+        {
+            if (table == null)
+                return;
+            UniConfigEditorSettings.instance.SetVisibleColumns(table.moduleName, table.tableName, _visibleColumns);
         }
 
         private void SyncColumnSelections(ConfigTable table)
@@ -1655,6 +1712,7 @@ namespace UniConfig.Editor
         {
             if (_searchColumns.Remove(oldName)) _searchColumns.Add(newName);
             if (_visibleColumns.Remove(oldName)) _visibleColumns.Add(newName);
+            SaveVisibleColumns(CurrentTable());
         }
 
         #endregion
@@ -1920,6 +1978,7 @@ namespace UniConfig.Editor
                 item.SetValue(name, FieldUtils.GetDefaultCellString(table.fields[table.fields.Count - 1]));
             _searchColumns.Add(name);
             _visibleColumns.Add(name);
+            SaveVisibleColumns(table);
             _dirty = true;
             MarkSearchDirty();
         }
