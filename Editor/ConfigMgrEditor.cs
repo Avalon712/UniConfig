@@ -96,19 +96,19 @@ namespace UniConfig.Editor
 
         /// <summary>
         /// 按行号取得一条配置。这里的 Id 是表的行号，从 1 开始，与编辑器中的 # 列一致，不是表的 tableId。
+        /// 行序与保存顺序一致，行号减 1 即列表下标，直接按下标取出并转为 <typeparamref name="T"/>。
         /// </summary>
         public static T GetConfigById<T>(int id) where T : IConfigTable
         {
-            if (id <= 0) return default;
-            int row = 0;
-            foreach (T config in GetConfigs<T>())
-            {
-                row++;
-                if (row == id)
-                    return config;
-            }
-
-            return default;
+            EnsureLoaded();
+            if (id <= 0 || _configsById == null || !TryResolveTableId(typeof(T), out int tableId))
+                return default;
+            if (!_configsById.TryGetValue(tableId, out object value) || value is not List<object> rows)
+                return default;
+            int index = id - 1;
+            if ((uint)index >= (uint)rows.Count)
+                return default;
+            return (T)rows[index];
         }
 
         public static T GetConfig<T>(Predicate<T> condition) where T : IConfigTable
