@@ -17,6 +17,7 @@ namespace UniConfig.Editor
 
         private void OnEnable()
         {
+            UniConfigEditorSettings.instance.EnsureDefaultRowColorTags();
             RebuildEnumList();
         }
 
@@ -114,6 +115,11 @@ namespace UniConfig.Editor
                 EditorGUILayout.Toggle(UniConfigLoc.T("settings.auto_row_id"), settings.autoRowIdField);
             if (settings.autoRowIdField)
                 EditorGUILayout.HelpBox(UniConfigLoc.T("settings.auto_row_id_hint"), MessageType.Info);
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField(UniConfigLoc.T("settings.color_tags"), EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(UniConfigLoc.T("settings.color_tags_hint"), MessageType.Info);
+            DrawRowColorTags(settings);
             settings.editorLanguage = EditorGUILayout.Popup(
                 UniConfigLoc.T("language"),
                 settings.editorLanguage,
@@ -151,6 +157,28 @@ namespace UniConfig.Editor
         /// <summary>
         /// Trim + 非空去重。removeEmpty=false 时保留空槽，保证点 + 能看到新行。
         /// </summary>
+        private static void DrawRowColorTags(UniConfigEditorSettings settings)
+        {
+            settings.rowColorTags ??= new List<RowColorTag>();
+            int removeAt = -1;
+            for (int i = 0; i < settings.rowColorTags.Count; i++)
+            {
+                RowColorTag tag = settings.rowColorTags[i] ?? new RowColorTag();
+                settings.rowColorTags[i] = tag;
+                EditorGUILayout.BeginHorizontal();
+                tag.name = EditorGUILayout.TextField(tag.name ?? string.Empty, GUILayout.Width(120));
+                tag.color = EditorGUILayout.ColorField(GUIContent.none, tag.color, false, false, false);
+                if (GUILayout.Button("-", GUILayout.Width(24)))
+                    removeAt = i;
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (removeAt >= 0)
+                settings.rowColorTags.RemoveAt(removeAt);
+            if (GUILayout.Button(UniConfigLoc.T("settings.color_tag_add"), GUILayout.Width(120)))
+                settings.rowColorTags.Add(new RowColorTag { name = "新颜色", color = Color.white });
+        }
+
         private static void TryApplyAutoRowIds()
         {
             try

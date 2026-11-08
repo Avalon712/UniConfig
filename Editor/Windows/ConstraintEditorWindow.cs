@@ -12,13 +12,13 @@ using UnityEngine;
 namespace UniConfig.Editor
 {
     /// <summary>
-    /// 字段约束编辑窗口（外键 / 公式）。
+    /// 字段约束编辑窗口（外键 / 公式 / 范围）。
     /// </summary>
     public sealed class ConstraintEditorWindow : EditorWindow
     {
         private const double FormulaApplyDebounce = 0.45d;
-        private static readonly string[] KindLabelsZh = { "外键引用", "公式计算" };
-        private static readonly string[] KindLabelsEn = { "Foreign Key", "Formula" };
+        private static readonly string[] KindLabelsZh = { "外键引用", "公式计算", "范围" };
+        private static readonly string[] KindLabelsEn = { "Foreign Key", "Formula", "Range" };
         private readonly HashSet<string> _appliedSignatures = new(StringComparer.Ordinal);
         private double _formulaApplyDueAt;
         private bool _formulaApplyPending;
@@ -165,9 +165,7 @@ namespace UniConfig.Editor
             for (int i = 0; i < table.constraints.Count; i++)
             {
                 FieldConstraint c = table.constraints[i];
-                string kind = c.Kind == FieldConstraintKind.ForeignKey
-                    ? UniConfigLoc.T("constraint.kind_fk")
-                    : UniConfigLoc.T("constraint.kind_formula");
+                string kind = KindLabel(c);
                 string label = string.IsNullOrEmpty(c.targetField)
                     ? $"[{i + 1}] {kind}"
                     : $"{c.targetField} · {kind}";
@@ -230,19 +228,33 @@ namespace UniConfig.Editor
             c.targetField = fieldNames[fieldIndex];
 
             string[] kinds = UniConfigLoc.IsChinese ? KindLabelsZh : KindLabelsEn;
+            if (c.kind < 0 || c.kind >= kinds.Length)
+                c.kind = (int)FieldConstraintKind.Formula;
             c.kind = EditorGUILayout.Popup(UniConfigLoc.T("constraint.kind"), c.kind, kinds);
             bool headerChanged = EditorGUI.EndChangeCheck();
             if (headerChanged)
             {
                 table.MarkFkValidationDirty();
                 ConstraintEvaluator.EnsureForeignKeyState(table);
+                if (c.Kind != FieldConstraintKind.Formula)
+                {
+                    _formulaApplyPending = false;
+                    _formulaWarning = string.Empty;
+                }
             }
 
             EditorGUILayout.Space(6);
             if (c.Kind == FieldConstraintKind.ForeignKey)
             {
                 _formulaWarning = string.Empty;
+                _formulaApplyPending = false;
                 DrawForeignKeyEditor(table, c);
+            }
+            else if (c.Kind == FieldConstraintKind.Range)
+            {
+                _formulaWarning = string.Empty;
+                _formulaApplyPending = false;
+                DrawRangeEditor(table, c);
             }
             else
             {
@@ -312,6 +324,49 @@ namespace UniConfig.Editor
                         ? UniConfigLoc.T("constraint.fk_invalid_status")
                         : hostTable.fkStatusDetail,
                     MessageType.Error);
+        }
+
+        private static string KindLabel(FieldConstraint c)
+        {
+            if (c != null && c.Kind == FieldConstraintKind.ForeignKey)
+                return UniConfigLoc.T("constraint.kind_fk");
+            if (c != null && c.Kind == FieldConstraintKind.Range)
+                return UniConfigLoc.T("constraint.kind_range");
+            return UniConfigLoc.T("constraint.kind_formula");
+        }
+
+        private static void DrawRangeEditor(ConfigTable table, FieldConstraint c)
+        {
+            EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_hint"), MessageType.Info);
+
+            EditorGUI.BeginChangeCheck();
+            c.rangeMin = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_min"), c.rangeMin);
+            c.rangeMax = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_max"), c.rangeMax);
+            EditorGUI.EndChangeCheck();
+
+            ConfigField field = null;
+            if (table?.fields != null)
+            {
+                foreach (ConfigField candidate in table.fields)
+                {
+                    if (candidate != null &&
+                        string.Equals(candidate.name, c.targetField, StringComparison.Ordinal))
+                    {
+                        field = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (field == null || !ConstraintEvaluator.IsScalarNumeric(field.type, out _))
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_not_numeric"), MessageType.Error);
+            else if (c.rangeMin > c.rangeMax)
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_order"), MessageType.Error);
+            else if (ConstraintEvaluator.IsFormulaField(table, field.name) ||
+                     UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_readonly"), MessageType.Warning);
+            else
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_ok"), MessageType.None);
         }
 
         private void DrawFormulaEditor(ConfigTable table, FieldConstraint c, bool forceCheck)
@@ -454,6 +509,7 @@ namespace UniConfig.Editor
             try
             {
                 List<string> formulaErrors = ConstraintEvaluator.ValidateAllFormulas(table);
+                formulaErrors.AddRange(ConstraintEvaluator.ValidateAllRanges(table));
                 if (formulaErrors.Count > 0)
                 {
                     _formulaWarning = string.Join("\n", formulaErrors);

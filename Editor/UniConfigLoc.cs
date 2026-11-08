@@ -78,8 +78,9 @@ namespace UniConfig.Editor
             ["add_row.tip"] = new[] { "添加行", "Add row" },
             ["search_cols"] = new[] { "搜索列", "Search Cols" },
             ["visible_cols"] = new[] { "显示列", "Visible Cols" },
-            ["delete_row"] = new[] { "删除行", "Del Row" },
-            ["delete_row.tip"] = new[] { "按行号删除（从 1 开始）", "Delete by row number (1-based)" },
+            ["delete_row"] = new[] { "删行", "Del Row" },
+            ["delete_row.tip"] = new[] { "勾选后每行调序按钮后出现删除按钮", "Show a delete button after the reorder buttons" },
+            ["delete_row.confirm"] = new[] { "确认删除第 {0} 行？", "Delete row {0}?" },
             ["delete_col"] = new[] { "删除列", "Del Col" },
             ["delete_col.tip"] = new[] { "删除下拉框中勾选的列", "Delete checked columns" },
             ["type"] = new[] { "类型", "Type" },
@@ -169,6 +170,18 @@ namespace UniConfig.Editor
             },
             ["settings.editor"] = new[] { "编辑器", "Editor" },
             ["settings.auto_save_close"] = new[] { "关闭时自动保存", "Auto-save on close" },
+            ["settings.color_tags"] = new[] { "行颜色标记", "Row color tags" },
+            ["settings.color_tags_hint"] = new[]
+            {
+                "这些颜色只在配置编辑器里给行做标记，不会写入导出的配置。表格中可按表单独隐藏颜色列。",
+                "These colors only mark rows in the config editor and are not exported. Each table can hide the color column on its own."
+            },
+            ["settings.color_tag_add"] = new[] { "添加颜色", "Add color" },
+            ["color_tag.show"] = new[] { "颜色", "Color" },
+            ["color_tag.none"] = new[] { "无", "None" },
+            ["row.reorder"] = new[] { "调序", "Reorder" },
+            ["row.move_up"] = new[] { "上移此行", "Move row up" },
+            ["row.move_down"] = new[] { "下移此行", "Move row down" },
             ["settings.auto_row_id"] = new[] { "自动创建 id 字段", "Auto-create id field" },
             ["settings.auto_row_id_hint"] = new[]
             {
@@ -184,7 +197,7 @@ namespace UniConfig.Editor
 
             // 约束
             ["constraint.open"] = new[] { "添加约束", "Constraints" },
-            ["constraint.open.tip"] = new[] { "打开字段约束编辑窗口（外键 / 公式）", "Open field constraints (FK / formula)" },
+            ["constraint.open.tip"] = new[] { "打开字段约束编辑窗口（外键 / 公式 / 范围）", "Open field constraints (FK / formula / range)" },
             ["constraint.table_missing"] = new[] { "表已不存在，请关闭此窗口。", "Table no longer exists. Close this window." },
             ["constraint.need_load"] = new[] { "请先加载表数据后再编辑约束。", "Load table data before editing constraints." },
             ["constraint.load_now"] = new[] { "立即加载", "Load Now" },
@@ -200,7 +213,7 @@ namespace UniConfig.Editor
             },
             ["constraint.formula_ok"] = new[] { "表达式合法。", "Expression is valid." },
             ["constraint.save_blocked"] = new[]
-                { "存在不合法的公式约束，已阻止保存。请先修正。", "Invalid formula constraint(s). Fix them before saving." },
+                { "存在不合法的约束，已阻止保存。请先修正。", "Invalid constraint(s). Fix them before saving." },
             ["constraint.recalc_warn"] = new[]
                 { "已更新 {0} 个单元格，另有 {1} 条警告。", "Updated {0} cell(s), with {1} warning(s)." },
             ["constraint.err_fk_incomplete"] = new[] { "字段 {0} 的外键配置不完整。", "FK config incomplete for field {0}." },
@@ -234,6 +247,32 @@ namespace UniConfig.Editor
             ["constraint.kind"] = new[] { "约束类型", "Type" },
             ["constraint.kind_fk"] = new[] { "外键", "FK" },
             ["constraint.kind_formula"] = new[] { "公式", "Formula" },
+            ["constraint.kind_range"] = new[] { "范围", "Range" },
+            ["constraint.range_min"] = new[] { "最小值", "Min" },
+            ["constraint.range_max"] = new[] { "最大值", "Max" },
+            ["constraint.range_hint"] = new[]
+            {
+                "整数或浮点列可设置闭区间。单元格左侧的 ↔ 按住左右拖可改数值，鼠标移动越快，数值变化越快；右侧仍可直接输入，结果会限制在范围内。",
+                "Integer or float columns can use an inclusive range. Drag ↔ on the left of a cell to scrub the value; faster mouse movement changes it faster. The rest of the cell can still be typed, and the result is clamped."
+            },
+            ["constraint.range_not_numeric"] = new[]
+                { "范围约束只能用在整数或浮点列上。", "Range constraints only apply to integer or floating-point columns." },
+            ["constraint.range_order"] = new[]
+                { "最小值不能大于最大值。", "Min cannot be greater than max." },
+            ["constraint.range_readonly"] = new[]
+            {
+                "该字段当前只读（公式或自动行号），范围拖动不会出现。",
+                "This field is read-only (formula or auto row id), so the range drag handle will not appear."
+            },
+            ["constraint.range_ok"] = new[]
+                { "范围内的值可以在表里拖动或输入。", "Values inside the range can be dragged or typed in the grid." },
+            ["constraint.err_range_type"] = new[]
+            {
+                "字段 {0} 不是整数或浮点列，不能使用范围约束。",
+                "Field {0} is not an integer or float column, so it cannot use a range constraint."
+            },
+            ["constraint.err_range_order"] = new[]
+                { "字段 {0} 的范围最小值大于最大值。", "Field {0} has min greater than max." },
             ["constraint.fk_module"] = new[] { "引用模块", "Ref Module" },
             ["constraint.fk_table"] = new[] { "引用表", "Ref Table" },
             ["constraint.fk_field"] = new[] { "引用字段", "Ref Field" },
@@ -266,8 +305,8 @@ namespace UniConfig.Editor
             ["constraint.formula_done"] = new[] { "公式已计算，更新 {0} 个单元格", "Formula computed, {0} cell(s) updated" },
             ["constraint.help"] = new[]
             {
-                "外键：目标字段值必须存在于引用表指定列，可用「校验外键」检查。\n公式：在 {{}} 中写本表字段或 模块/表.字段，如 ({attack}-{defend})*2 或 {value}+{Test2Module/Skill.attack}。\n有公式约束的字段在表里不可编辑；改依赖字段会自动重算。表达式合法后自动全表算一遍。「全部重算」可手动再算。最后点「保存」写入文件。",
-                "FK: values must exist in the referenced column; use Validate FK.\nFormula: write {field} or {Module/Table.field} inside braces, e.g. ({attack}-{defend})*2.\nFormula fields are read-only; changing dependencies auto-recalculates. A full apply runs when the formula becomes valid. Use Recalc All anytime. Click Save to persist."
+                "外键：目标字段值必须存在于引用表指定列，可用「校验外键」检查。\n公式：在 {{}} 中写本表字段或 模块/表.字段，如 ({attack}-{defend})*2 或 {value}+{Test2Module/Skill.attack}。\n有公式约束的字段在表里不可编辑；改依赖字段会自动重算。表达式合法后自动全表算一遍。「全部重算」可手动再算。\n范围：整数或浮点列限制在最小值和最大值之间。表里该列左侧出现 ↔，按住左右拖可改数值，鼠标越快数值变得越快。最后点「保存」写入文件。",
+                "FK: values must exist in the referenced column; use Validate FK.\nFormula: write {field} or {Module/Table.field} inside braces, e.g. ({attack}-{defend})*2.\nFormula fields are read-only; changing dependencies auto-recalculates. A full apply runs when the formula becomes valid. Use Recalc All anytime.\nRange: integer or float columns are clamped between min and max. Drag ↔ on the left of the cell; faster mouse movement changes the value faster. Click Save to persist."
             }
         };
 

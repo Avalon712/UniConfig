@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 namespace UniConfig.Editor
 {
     /// <summary>
-    /// 字段约束：外键校验与公式计算。
+    /// 字段约束：外键校验、公式计算与数值范围。
     /// </summary>
     public static class ConstraintEvaluator
     {
@@ -307,6 +307,206 @@ namespace UniConfig.Editor
                 if (c?.Kind == FieldConstraintKind.Formula)
                     errors.AddRange(ValidateFormulaConstraint(table, c));
             return errors;
+        }
+
+        public static bool IsScalarNumeric(SupportableFieldType type, out bool integer)
+        {
+            switch (type)
+            {
+                case SupportableFieldType.Int16:
+                case SupportableFieldType.Int32:
+                case SupportableFieldType.Int64:
+                case SupportableFieldType.UInt16:
+                case SupportableFieldType.UInt32:
+                case SupportableFieldType.UInt64:
+                    integer = true;
+                    return true;
+                case SupportableFieldType.Single:
+                case SupportableFieldType.Double:
+                    integer = false;
+                    return true;
+                default:
+                    integer = false;
+                    return false;
+            }
+        }
+
+        public static bool TryGetRange(ConfigTable table, ConfigField field, out double min, out double max)
+        {
+            min = 0;
+            max = 0;
+            if (table?.constraints == null || field == null || !IsScalarNumeric(field.type, out _))
+                return false;
+
+            foreach (FieldConstraint c in table.constraints)
+            {
+                if (c == null || c.Kind != FieldConstraintKind.Range)
+                    continue;
+                if (!string.Equals(c.targetField, field.name, StringComparison.Ordinal))
+                    continue;
+                min = c.rangeMin;
+                max = c.rangeMax;
+                return true;
+            }
+
+            return false;
+        }
+
+        public static List<string> ValidateAllRanges(ConfigTable table)
+        {
+            List<string> errors = new();
+            if (table?.constraints == null) return errors;
+            foreach (FieldConstraint c in table.constraints)
+                if (c?.Kind == FieldConstraintKind.Range)
+                    errors.AddRange(ValidateRangeConstraint(table, c));
+            return errors;
+        }
+
+        public static List<string> ValidateRangeConstraint(ConfigTable table, FieldConstraint c)
+        {
+            List<string> errors = new();
+            if (c == null || c.Kind != FieldConstraintKind.Range)
+                return errors;
+            if (string.IsNullOrEmpty(c.targetField))
+            {
+                errors.Add(UniConfigLoc.T("constraint.err_no_target"));
+                return errors;
+            }
+
+            ConfigField field = FindField(table, c.targetField);
+            if (field == null)
+            {
+                errors.Add(UniConfigLoc.F("constraint.err_target_missing", c.targetField));
+                return errors;
+            }
+
+            if (!IsScalarNumeric(field.type, out _))
+                errors.Add(UniConfigLoc.F("constraint.err_range_type", c.targetField));
+            if (c.rangeMin > c.rangeMax)
+                errors.Add(UniConfigLoc.F("constraint.err_range_order", c.targetField));
+            return errors;
+        }
+
+        public static bool TryParseScalar(string text, out double value)
+        {
+            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+                   !double.IsNaN(value) &&
+                   !double.IsInfinity(value);
+        }
+
+        public static double ClampScalar(double value, double rangeMin, double rangeMax, SupportableFieldType type)
+        {
+            if (rangeMin > rangeMax)
+            {
+                double swap = rangeMin;
+                rangeMin = rangeMax;
+                rangeMax = swap;
+            }
+
+            GetScalarLimits(type, out double typeMin, out double typeMax);
+            double min = Math.Max(rangeMin, typeMin);
+            double max = Math.Min(rangeMax, typeMax);
+            if (min > max)
+            {
+                min = typeMin;
+                max = typeMax;
+            }
+
+            if (double.IsNaN(value) || value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        public static string FormatScalar(double value, SupportableFieldType type)
+        {
+            if (!IsScalarNumeric(type, out bool integer))
+                return value.ToString("G17", CultureInfo.InvariantCulture);
+
+            GetScalarLimits(type, out double typeMin, out double typeMax);
+            if (double.IsNaN(value) || value < typeMin) value = typeMin;
+            if (value > typeMax) value = typeMax;
+
+            if (!integer)
+            {
+                double rounded = Math.Round(value, 6, MidpointRounding.AwayFromZero);
+                return rounded.ToString("0.######", CultureInfo.InvariantCulture);
+            }
+
+            double whole = Math.Round(value, MidpointRounding.AwayFromZero);
+            return whole.ToString("0", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 慢速拖动大约 200 像素走过整个范围。鼠标越快，单帧位移越大，再用 1.5 次方放大，数值变化跟手速正相关。
+        /// </summary>
+        public static double RangeDragDelta(double rangeMin, double rangeMax, float mouseDeltaX, bool integer)
+        {
+            double absPixels = Math.Abs(mouseDeltaX);
+            if (absPixels < 1e-6)
+                return 0;
+
+            double span = Math.Abs(rangeMax - rangeMin);
+            double perPixel = span / 200.0;
+            if (integer)
+                perPixel = Math.Max(perPixel, 1.0 / 12.0);
+            if (perPixel <= 0)
+                return 0;
+
+            double acceleratedPixels = Math.Sign(mouseDeltaX) * Math.Pow(absPixels, 1.5);
+            return acceleratedPixels * perPixel;
+        }
+
+        private static ConfigField FindField(ConfigTable table, string fieldName)
+        {
+            if (table?.fields == null || string.IsNullOrEmpty(fieldName))
+                return null;
+            foreach (ConfigField field in table.fields)
+                if (field != null && string.Equals(field.name, fieldName, StringComparison.Ordinal))
+                    return field;
+            return null;
+        }
+
+        private static void GetScalarLimits(SupportableFieldType type, out double min, out double max)
+        {
+            switch (type)
+            {
+                case SupportableFieldType.Int16:
+                    min = short.MinValue;
+                    max = short.MaxValue;
+                    return;
+                case SupportableFieldType.Int32:
+                    min = int.MinValue;
+                    max = int.MaxValue;
+                    return;
+                case SupportableFieldType.Int64:
+                    min = long.MinValue;
+                    max = long.MaxValue;
+                    return;
+                case SupportableFieldType.UInt16:
+                    min = ushort.MinValue;
+                    max = ushort.MaxValue;
+                    return;
+                case SupportableFieldType.UInt32:
+                    min = uint.MinValue;
+                    max = uint.MaxValue;
+                    return;
+                case SupportableFieldType.UInt64:
+                    min = 0d;
+                    max = ulong.MaxValue;
+                    return;
+                case SupportableFieldType.Single:
+                    min = float.MinValue;
+                    max = float.MaxValue;
+                    return;
+                case SupportableFieldType.Double:
+                    min = double.MinValue;
+                    max = double.MaxValue;
+                    return;
+                default:
+                    min = double.NegativeInfinity;
+                    max = double.PositiveInfinity;
+                    return;
+            }
         }
 
         /// <summary>

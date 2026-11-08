@@ -16,11 +16,16 @@ namespace UniConfig.Editor
         /// <summary>
         /// 公式：目标字段值由表达式计算得到。
         /// </summary>
-        Formula = 1
+        Formula = 1,
+
+        /// <summary>
+        /// 范围：整数或浮点字段限制在闭区间内，编辑时可以按住左右拖动。
+        /// </summary>
+        Range = 2
     }
 
     /// <summary>
-    /// 字段约束（外键 / 公式计算）。
+    /// 字段约束（外键 / 公式 / 范围）。
     /// </summary>
     [Serializable]
     public sealed class FieldConstraint
@@ -57,6 +62,12 @@ namespace UniConfig.Editor
         /// </summary>
         public string lookupKeyField = "id";
 
+        /// <summary>范围约束最小值（含）。</summary>
+        public double rangeMin;
+
+        /// <summary>范围约束最大值（含）。</summary>
+        public double rangeMax;
+
         public FieldConstraintKind Kind
         {
             get => (FieldConstraintKind)kind;
@@ -73,7 +84,9 @@ namespace UniConfig.Editor
                 fkTable = fkTable,
                 fkField = fkField,
                 expression = expression,
-                lookupKeyField = lookupKeyField
+                lookupKeyField = lookupKeyField,
+                rangeMin = rangeMin,
+                rangeMax = rangeMax
             };
         }
     }

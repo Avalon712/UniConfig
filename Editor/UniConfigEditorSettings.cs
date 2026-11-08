@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEngine;
 
 #endregion
 
@@ -55,6 +56,29 @@ namespace UniConfig.Editor
         /// 每张表的「显示列」选择。下次打开该表时恢复。
         /// </summary>
         public List<TableVisibleColumns> visibleColumnEntries = new();
+
+        /// <summary>
+        /// 行颜色标记可选颜色。只用于编辑器，不写入导出配置。
+        /// </summary>
+        public List<RowColorTag> rowColorTags = new();
+
+        /// <summary>为 true 后不再把空列表补回默认 5 色，允许用户删光。</summary>
+        public bool rowColorTagsInitialized;
+
+        /// <summary>
+        /// 每张表是否显示颜色标记列。没有记录时默认显示。
+        /// </summary>
+        public List<TableColorTagVisibility> colorTagVisibility = new();
+
+        /// <summary>
+        /// 每张表是否显示行顺序按钮。没有记录时不显示。
+        /// </summary>
+        public List<TableColorTagVisibility> rowReorderVisibility = new();
+
+        /// <summary>
+        /// 每张表是否显示行删除按钮。没有记录时不显示。
+        /// </summary>
+        public List<TableColorTagVisibility> rowDeleteVisibility = new();
 
         /// <summary>
         /// 编辑器界面语言：0=中文，1=English（默认中文）
@@ -135,6 +159,156 @@ namespace UniConfig.Editor
                 SaveSettings();
         }
 
+        public void EnsureDefaultRowColorTags()
+        {
+            rowColorTags ??= new List<RowColorTag>();
+            if (rowColorTagsInitialized)
+                return;
+            if (rowColorTags.Count == 0)
+            {
+                rowColorTags.Add(new RowColorTag { name = "红", color = new Color(0.86f, 0.30f, 0.30f) });
+                rowColorTags.Add(new RowColorTag { name = "橙", color = new Color(0.90f, 0.55f, 0.22f) });
+                rowColorTags.Add(new RowColorTag { name = "黄", color = new Color(0.86f, 0.76f, 0.28f) });
+                rowColorTags.Add(new RowColorTag { name = "绿", color = new Color(0.32f, 0.70f, 0.40f) });
+                rowColorTags.Add(new RowColorTag { name = "蓝", color = new Color(0.32f, 0.55f, 0.86f) });
+            }
+
+            rowColorTagsInitialized = true;
+            SaveSettings();
+        }
+
+        public bool GetShowRowDelete(string moduleName, string tableName)
+        {
+            TableColorTagVisibility entry = FindVisibility(rowDeleteVisibility, moduleName, tableName);
+            return entry != null && entry.visible;
+        }
+
+        public void SetShowRowDelete(string moduleName, string tableName, bool visible)
+        {
+            SetVisibility(ref rowDeleteVisibility, moduleName, tableName, visible);
+        }
+
+        public void RenameRowDeleteTable(string moduleName, string oldTableName, string newTableName)
+        {
+            RenameVisibilityTable(rowDeleteVisibility, moduleName, oldTableName, newTableName);
+        }
+
+        public void RenameRowDeleteModule(string oldModuleName, string newModuleName)
+        {
+            RenameVisibilityModule(rowDeleteVisibility, oldModuleName, newModuleName);
+        }
+
+        public void RemoveRowDelete(string moduleName, string tableName)
+        {
+            RemoveVisibility(rowDeleteVisibility, moduleName, tableName);
+        }
+
+        public void RemoveRowDeleteForModule(string moduleName)
+        {
+            RemoveVisibilityForModule(rowDeleteVisibility, moduleName);
+        }
+
+        public bool GetShowRowReorder(string moduleName, string tableName)
+        {
+            TableColorTagVisibility entry = FindVisibility(rowReorderVisibility, moduleName, tableName);
+            return entry != null && entry.visible;
+        }
+
+        public void SetShowRowReorder(string moduleName, string tableName, bool visible)
+        {
+            SetVisibility(ref rowReorderVisibility, moduleName, tableName, visible);
+        }
+
+        public void RenameRowReorderTable(string moduleName, string oldTableName, string newTableName)
+        {
+            RenameVisibilityTable(rowReorderVisibility, moduleName, oldTableName, newTableName);
+        }
+
+        public void RenameRowReorderModule(string oldModuleName, string newModuleName)
+        {
+            RenameVisibilityModule(rowReorderVisibility, oldModuleName, newModuleName);
+        }
+
+        public void RemoveRowReorder(string moduleName, string tableName)
+        {
+            RemoveVisibility(rowReorderVisibility, moduleName, tableName);
+        }
+
+        public void RemoveRowReorderForModule(string moduleName)
+        {
+            RemoveVisibilityForModule(rowReorderVisibility, moduleName);
+        }
+
+        public bool GetShowColorTag(string moduleName, string tableName)
+        {
+            TableColorTagVisibility entry = FindColorTagVisibility(moduleName, tableName);
+            return entry == null || entry.visible;
+        }
+
+        public void SetShowColorTag(string moduleName, string tableName, bool visible)
+        {
+            if (string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
+                return;
+            colorTagVisibility ??= new List<TableColorTagVisibility>();
+            TableColorTagVisibility entry = FindColorTagVisibility(moduleName, tableName);
+            if (entry == null)
+            {
+                entry = new TableColorTagVisibility { moduleName = moduleName, tableName = tableName };
+                colorTagVisibility.Add(entry);
+            }
+
+            entry.visible = visible;
+            SaveSettings();
+        }
+
+        public void RenameColorTagVisibilityTable(string moduleName, string oldTableName, string newTableName)
+        {
+            TableColorTagVisibility entry = FindColorTagVisibility(moduleName, oldTableName);
+            if (entry == null)
+                return;
+            entry.tableName = newTableName;
+            SaveSettings();
+        }
+
+        public void RenameColorTagVisibilityModule(string oldModuleName, string newModuleName)
+        {
+            if (colorTagVisibility == null)
+                return;
+            bool changed = false;
+            foreach (TableColorTagVisibility entry in colorTagVisibility)
+            {
+                if (entry == null || !string.Equals(entry.moduleName, oldModuleName, StringComparison.Ordinal))
+                    continue;
+                entry.moduleName = newModuleName;
+                changed = true;
+            }
+
+            if (changed)
+                SaveSettings();
+        }
+
+        public void RemoveColorTagVisibility(string moduleName, string tableName)
+        {
+            if (colorTagVisibility == null)
+                return;
+            int removed = colorTagVisibility.RemoveAll(entry =>
+                entry != null &&
+                string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal) &&
+                string.Equals(entry.tableName, tableName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
+        }
+
+        public void RemoveColorTagVisibilityForModule(string moduleName)
+        {
+            if (colorTagVisibility == null)
+                return;
+            int removed = colorTagVisibility.RemoveAll(entry =>
+                entry != null && string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
+        }
+
         public void RemoveVisibleColumnsForModule(string moduleName)
         {
             if (visibleColumnEntries == null)
@@ -166,6 +340,111 @@ namespace UniConfig.Editor
 
             return null;
         }
+
+        private TableColorTagVisibility FindColorTagVisibility(string moduleName, string tableName)
+        {
+            return FindVisibility(colorTagVisibility, moduleName, tableName);
+        }
+
+        private static TableColorTagVisibility FindVisibility(List<TableColorTagVisibility> entries, string moduleName,
+            string tableName)
+        {
+            if (entries == null || string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
+                return null;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                TableColorTagVisibility entry = entries[i];
+                if (entry == null)
+                    continue;
+                if (string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal) &&
+                    string.Equals(entry.tableName, tableName, StringComparison.Ordinal))
+                    return entry;
+            }
+
+            return null;
+        }
+
+        private void SetVisibility(ref List<TableColorTagVisibility> entries, string moduleName, string tableName,
+            bool visible)
+        {
+            if (string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
+                return;
+            entries ??= new List<TableColorTagVisibility>();
+            TableColorTagVisibility entry = FindVisibility(entries, moduleName, tableName);
+            if (entry == null)
+            {
+                entry = new TableColorTagVisibility { moduleName = moduleName, tableName = tableName };
+                entries.Add(entry);
+            }
+
+            entry.visible = visible;
+            SaveSettings();
+        }
+
+        private void RenameVisibilityTable(List<TableColorTagVisibility> entries, string moduleName,
+            string oldTableName, string newTableName)
+        {
+            TableColorTagVisibility entry = FindVisibility(entries, moduleName, oldTableName);
+            if (entry == null)
+                return;
+            entry.tableName = newTableName;
+            SaveSettings();
+        }
+
+        private void RenameVisibilityModule(List<TableColorTagVisibility> entries, string oldModuleName,
+            string newModuleName)
+        {
+            if (entries == null)
+                return;
+            bool changed = false;
+            foreach (TableColorTagVisibility entry in entries)
+            {
+                if (entry == null || !string.Equals(entry.moduleName, oldModuleName, StringComparison.Ordinal))
+                    continue;
+                entry.moduleName = newModuleName;
+                changed = true;
+            }
+
+            if (changed)
+                SaveSettings();
+        }
+
+        private void RemoveVisibility(List<TableColorTagVisibility> entries, string moduleName, string tableName)
+        {
+            if (entries == null)
+                return;
+            int removed = entries.RemoveAll(entry =>
+                entry != null &&
+                string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal) &&
+                string.Equals(entry.tableName, tableName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
+        }
+
+        private void RemoveVisibilityForModule(List<TableColorTagVisibility> entries, string moduleName)
+        {
+            if (entries == null)
+                return;
+            int removed = entries.RemoveAll(entry =>
+                entry != null && string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
+        }
+    }
+
+    [Serializable]
+    public sealed class RowColorTag
+    {
+        public string name;
+        public Color color = Color.white;
+    }
+
+    [Serializable]
+    public sealed class TableColorTagVisibility
+    {
+        public string moduleName;
+        public string tableName;
+        public bool visible = true;
     }
 
     [Serializable]

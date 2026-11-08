@@ -125,6 +125,9 @@ namespace UniConfig.Editor
                 return;
             ConfigRawStorage.DeleteModuleDirectory(moduleName);
             UniConfigEditorSettings.instance.RemoveVisibleColumnsForModule(moduleName);
+            UniConfigEditorSettings.instance.RemoveColorTagVisibilityForModule(moduleName);
+            UniConfigEditorSettings.instance.RemoveRowReorderForModule(moduleName);
+            UniConfigEditorSettings.instance.RemoveRowDeleteForModule(moduleName);
             ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
@@ -164,6 +167,9 @@ namespace UniConfig.Editor
             ConfigRawStorage.DeleteTableFile(moduleName, tableName);
             SaveModule(module);
             UniConfigEditorSettings.instance.RemoveVisibleColumns(moduleName, tableName);
+            UniConfigEditorSettings.instance.RemoveColorTagVisibility(moduleName, tableName);
+            UniConfigEditorSettings.instance.RemoveRowReorder(moduleName, tableName);
+            UniConfigEditorSettings.instance.RemoveRowDelete(moduleName, tableName);
             ConfigMgrEditor.NotifyEditorDataChanged();
         }
 
@@ -186,6 +192,9 @@ namespace UniConfig.Editor
                 SaveTable(table);
             SaveModule(module);
             UniConfigEditorSettings.instance.RenameVisibleColumnsTable(moduleName, oldName, newName);
+            UniConfigEditorSettings.instance.RenameColorTagVisibilityTable(moduleName, oldName, newName);
+            UniConfigEditorSettings.instance.RenameRowReorderTable(moduleName, oldName, newName);
+            UniConfigEditorSettings.instance.RenameRowDeleteTable(moduleName, oldName, newName);
             if (!table.dataLoaded)
                 ConfigMgrEditor.NotifyEditorDataChanged();
         }
@@ -215,6 +224,9 @@ namespace UniConfig.Editor
                 Directory.Move(oldDir, newDir);
 
             UniConfigEditorSettings.instance.RenameVisibleColumnsModule(oldName, newName);
+            UniConfigEditorSettings.instance.RenameColorTagVisibilityModule(oldName, newName);
+            UniConfigEditorSettings.instance.RenameRowReorderModule(oldName, newName);
+            UniConfigEditorSettings.instance.RenameRowDeleteModule(oldName, newName);
             SaveModule(module);
             ConfigMgrEditor.BeginSaveBatch();
             try

@@ -15,6 +15,11 @@ namespace UniConfig.Editor
         /// </summary>
         public Dictionary<string, string> fieldData = new();
 
+        /// <summary>
+        /// 行颜色标记。0 表示未标记，1 起对应设置中颜色列表的下标加 1。不参与导出。
+        /// </summary>
+        public int colorTag;
+
         public string GetValue(string fieldName)
         {
             return fieldData.TryGetValue(fieldName, out string value) ? value : string.Empty;

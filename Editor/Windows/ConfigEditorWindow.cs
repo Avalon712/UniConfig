@@ -20,6 +20,9 @@ namespace UniConfig.Editor
         private const float RowHeight = 20f;
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
+        private const float RowReorderWidth = 40f;
+        private const float RowDeleteWidth = 16f;
+        private const float ColorTagColWidth = 22f;
         private const float TreeItemHeight = 20f;
         /// <summary>表格内容右缘少量留白。</summary>
         private const float GridScrollPadX = 4f;
@@ -41,11 +44,11 @@ namespace UniConfig.Editor
         private GUIStyle _cellStyle;
         private int _dataPageIndex;
         private string _dataSearch = string.Empty;
-        private string _deleteRowInput = string.Empty;
         private bool _dirty;
         private List<int> _displayRowIndices = new();
         private Vector2 _gridScroll;
         private GUIStyle _headerStyle;
+        private GUIStyle _rowDeleteStyle;
         private bool _isSearching;
         private GUIStyle _paneTitleStyle;
         private int _readyItemCount = -1;
@@ -71,6 +74,10 @@ namespace UniConfig.Editor
 
         private string _treeSearch = string.Empty;
         private bool _visibleColumnsInitialized;
+        private bool _rangeDragActive;
+        private double _rangeDragValue;
+        private string _rangeEditKey;
+        private string _rangeEditText;
 
         private Color GridLine => EditorGUIUtility.isProSkin
             ? new Color(0.12f, 0.12f, 0.12f, 1f)
@@ -111,6 +118,7 @@ namespace UniConfig.Editor
         private void OnEnable()
         {
             minSize = new Vector2(800, 360);
+            UniConfigEditorSettings.instance.EnsureDefaultRowColorTags();
             EditorConfigMgr.EnsureLoaded();
             titleContent = Content("UniConfig", null, "ScriptableObject Icon", "d_ScriptableObject Icon");
             // 域重载后延迟恢复，确保模块列表已就绪
@@ -127,6 +135,12 @@ namespace UniConfig.Editor
 
         private void OnDisable()
         {
+            if (_rangeDragActive)
+            {
+                _rangeDragActive = false;
+                EditorGUIUtility.SetWantsMouseJumping(0);
+            }
+
             PersistUiState();
             EditorApplication.delayCall -= RestoreUiStateAfterReload;
             if (UniConfigEditorSettings.instance.autoSaveOnClose && _dirty)
@@ -202,6 +216,11 @@ namespace UniConfig.Editor
         private void OnGUI()
         {
             EnsureStyles();
+            if (_rangeDragActive && GUIUtility.hotControl == 0)
+            {
+                _rangeDragActive = false;
+                EditorGUIUtility.SetWantsMouseJumping(0);
+            }
 
             // 必须在 TextField 之前拦截，否则 Enter 会被输入框吞掉
             if (TryHandleRenameHotkeys())
@@ -1000,15 +1019,29 @@ namespace UniConfig.Editor
             if (DrawColumnMaskField(UniConfigLoc.T("visible_cols"), table, _visibleColumns, true))
                 SaveVisibleColumns(table);
 
+            bool showColorTag = UniConfigEditorSettings.instance.GetShowColorTag(table.moduleName, table.tableName);
+            bool showColorTagNext = GUILayout.Toggle(showColorTag, UniConfigLoc.T("color_tag.show"),
+                EditorStyles.toolbarButton, GUILayout.Width(UniConfigLoc.IsChinese ? 40 : 52));
+            if (showColorTagNext != showColorTag)
+                UniConfigEditorSettings.instance.SetShowColorTag(table.moduleName, table.tableName, showColorTagNext);
+
+            bool showRowReorder = UniConfigEditorSettings.instance.GetShowRowReorder(table.moduleName, table.tableName);
+            bool showRowReorderNext = GUILayout.Toggle(showRowReorder, UniConfigLoc.T("row.reorder"),
+                EditorStyles.toolbarButton, GUILayout.Width(UniConfigLoc.IsChinese ? 40 : 64));
+            if (showRowReorderNext != showRowReorder)
+                UniConfigEditorSettings.instance.SetShowRowReorder(table.moduleName, table.tableName,
+                    showRowReorderNext);
+
+            bool showRowDelete = UniConfigEditorSettings.instance.GetShowRowDelete(table.moduleName, table.tableName);
+            bool showRowDeleteNext = GUILayout.Toggle(showRowDelete, UniConfigLoc.T("delete_row"),
+                EditorStyles.toolbarButton, GUILayout.Width(UniConfigLoc.IsChinese ? 40 : 64));
+            if (showRowDeleteNext != showRowDelete)
+                UniConfigEditorSettings.instance.SetShowRowDelete(table.moduleName, table.tableName, showRowDeleteNext);
+
             if (searchTextChanged || searchColumnsChanged)
                 MarkSearchDirty();
 
             GUILayout.FlexibleSpace();
-
-            _deleteRowInput = EditorGUILayout.TextField(_deleteRowInput ?? string.Empty, GUILayout.Width(36));
-            if (ToolbarButton(UniConfigLoc.T("delete_row"), UniConfigLoc.T("delete_row.tip"), "TreeEditor.Trash",
-                    "d_TreeEditor.Trash"))
-                TryDeleteRowByInput(table);
 
             GUILayout.Space(6);
             DrawColumnMaskField(null, table, _columnsToDelete, false);
@@ -1017,25 +1050,6 @@ namespace UniConfig.Editor
                 DeleteSelectedColumns(table);
 
             EditorGUILayout.EndHorizontal();
-        }
-
-        private void TryDeleteRowByInput(ConfigTable table)
-        {
-            if (string.IsNullOrWhiteSpace(_deleteRowInput))
-            {
-                EditorUtility.DisplayDialog(UniConfigLoc.T("delete_row.title"), UniConfigLoc.T("delete_row.need_index"),
-                    UniConfigLoc.T("ok"));
-                return;
-            }
-
-            if (!int.TryParse(_deleteRowInput.Trim(), out int oneBasedIndex))
-            {
-                EditorUtility.DisplayDialog(UniConfigLoc.T("delete_row.title"), UniConfigLoc.T("delete_row.need_int"),
-                    UniConfigLoc.T("ok"));
-                return;
-            }
-
-            DeleteRowByIndex(table, oneBasedIndex);
         }
 
         private void DeleteRowByIndex(ConfigTable table, int oneBasedIndex)
@@ -1057,7 +1071,6 @@ namespace UniConfig.Editor
             table.items.RemoveAt(oneBasedIndex - 1);
             table.cachedRowCount = table.items.Count;
             EditorConfigMgr.EnsureAutoRowId(table);
-            _deleteRowInput = string.Empty;
             _dirty = true;
             _status = UniConfigLoc.F("status.row_deleted", oneBasedIndex);
             GUI.FocusControl(null);
@@ -1144,7 +1157,7 @@ namespace UniConfig.Editor
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(visibleFieldIndices.Count);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices.Count);
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
 
             Rect view = GUILayoutUtility.GetRect(
@@ -1164,7 +1177,7 @@ namespace UniConfig.Editor
                 EditorGUILayout.HelpBox(UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
 
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(visibleFieldIndices.Count);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices.Count);
             List<int> matched = _displayRowIndices ?? new List<int>();
             int pageSize = ConfigPaths.ShardRowLimit;
             int pageCount = matched.Count == 0
@@ -1193,7 +1206,9 @@ namespace UniConfig.Editor
             if (!columnOpsChanged)
             {
                 bool highlight = !string.IsNullOrEmpty(_readySearchPattern);
-                for (int i = pageStart; i < pageEnd; i++)
+                bool showColorTag = ShowColorTag(table);
+                bool rowMoved = false;
+                for (int i = pageStart; i < pageEnd && !rowMoved; i++)
                 {
                     int row = matched[i];
                     if (row < 0 || row >= table.items.Count)
@@ -1203,11 +1218,34 @@ namespace UniConfig.Editor
                     bool even = (i - pageStart) % 2 == 0;
                     Color rowBg = highlight ? RowMatch : even ? RowEven : RowOdd;
 
-                    Rect indexRect = new(x0, y, IndexColWidth, RowHeight);
-                    DrawCellBackground(indexRect, rowBg, true);
-                    GUI.Label(indexRect, (row + 1).ToString(), _headerStyle);
+                    float x = x0;
+                    if (showColorTag)
+                    {
+                        Rect tagRect = new(x, y, ColorTagColWidth, RowHeight);
+                        DrawCellBackground(tagRect, rowBg, true);
+                        if (DrawColorTagCell(tagRect, item))
+                            _dirty = true;
+                        x += ColorTagColWidth;
+                    }
 
-                    float x = x0 + IndexColWidth;
+                    float indexWidth = IndexColumnWidth(table);
+                    Rect indexRect = new(x, y, indexWidth, RowHeight);
+                    DrawCellBackground(indexRect, rowBg, true);
+                    GUI.Label(new Rect(indexRect.x, indexRect.y, IndexColWidth, RowHeight), (row + 1).ToString(),
+                        _headerStyle);
+                    float actionX = indexRect.x + IndexColWidth;
+                    if (ShowRowReorder(table))
+                    {
+                        if (DrawRowMoveButtons(table, row, new Rect(actionX, indexRect.y, RowReorderWidth, RowHeight)))
+                            rowMoved = true;
+                        actionX += RowReorderWidth;
+                    }
+
+                    if (!rowMoved && ShowRowDelete(table) &&
+                        DrawRowDeleteButton(table, row, new Rect(actionX, indexRect.y, RowDeleteWidth, RowHeight)))
+                        rowMoved = true;
+
+                    x += indexWidth;
                     foreach (int fi in visibleFieldIndices)
                     {
                         ConfigField field = table.fields[fi];
@@ -1231,6 +1269,11 @@ namespace UniConfig.Editor
                                 x += ColWidth;
                                 continue;
                             }
+                        }
+                        else if (ConstraintEvaluator.TryGetRange(table, field, out double rangeMin, out double rangeMax))
+                        {
+                            if (DrawRangeCell(fieldRect, table, row, field, item, rangeMin, rangeMax))
+                                _dirty = true;
                         }
                         else
                         {
@@ -1263,9 +1306,149 @@ namespace UniConfig.Editor
         /// <summary>
         /// 表格可滚动内容宽度（列总和 + 右缘留白）。滚动条由 <see cref="GUI.BeginScrollView"/> 单独占用视口，不再计入内容宽。
         /// </summary>
-        private static float GetSpreadsheetContentWidth(int visibleColumnCount)
+        private static float GetSpreadsheetContentWidth(ConfigTable table, int visibleColumnCount)
         {
-            return IndexColWidth + visibleColumnCount * ColWidth + GridScrollPadX;
+            float prefix = IndexColumnWidth(table) + (ShowColorTag(table) ? ColorTagColWidth : 0f);
+            return prefix + visibleColumnCount * ColWidth + GridScrollPadX;
+        }
+
+        private static float IndexColumnWidth(ConfigTable table)
+        {
+            float width = IndexColWidth;
+            if (ShowRowReorder(table))
+                width += RowReorderWidth;
+            if (ShowRowDelete(table))
+                width += RowDeleteWidth;
+            return width;
+        }
+
+        private static bool ShowRowReorder(ConfigTable table)
+        {
+            return table != null &&
+                   UniConfigEditorSettings.instance.GetShowRowReorder(table.moduleName, table.tableName);
+        }
+
+        private static bool ShowRowDelete(ConfigTable table)
+        {
+            return table != null &&
+                   UniConfigEditorSettings.instance.GetShowRowDelete(table.moduleName, table.tableName);
+        }
+
+        private static bool ShowColorTag(ConfigTable table)
+        {
+            return table != null &&
+                   UniConfigEditorSettings.instance.GetShowColorTag(table.moduleName, table.tableName);
+        }
+
+        /// <returns>颜色选择发生变化。</returns>
+        private bool DrawColorTagCell(Rect rect, ConfigItem item)
+        {
+            Color swatch = new(0.22f, 0.22f, 0.22f, 1f);            List<RowColorTag> tags = UniConfigEditorSettings.instance.rowColorTags;
+            int index = item.colorTag - 1;
+            if (tags != null && index >= 0 && index < tags.Count && tags[index] != null)
+                swatch = tags[index].color;
+
+            EditorGUI.DrawRect(Inset(rect, 2f), swatch);
+            if (Event.current.type != EventType.MouseDown || !rect.Contains(Event.current.mousePosition))
+                return false;
+
+            ShowColorTagMenu(rect, item);
+            Event.current.Use();
+            return false;
+        }
+
+        private void ShowColorTagMenu(Rect rect, ConfigItem item)
+        {
+            GenericMenu menu = new();
+            menu.AddItem(new GUIContent(UniConfigLoc.T("color_tag.none")), item.colorTag <= 0, () =>
+            {
+                item.colorTag = 0;
+                _dirty = true;
+                Repaint();
+            });
+
+            List<RowColorTag> tags = UniConfigEditorSettings.instance.rowColorTags;
+            if (tags != null)
+            {
+                for (int i = 0; i < tags.Count; i++)
+                {
+                    int tagValue = i + 1;
+                    string label = string.IsNullOrEmpty(tags[i]?.name) ? tagValue.ToString() : tags[i].name;
+                    menu.AddItem(new GUIContent(label), item.colorTag == tagValue, () =>
+                    {
+                        item.colorTag = tagValue;
+                        _dirty = true;
+                        Repaint();
+                    });
+                }
+            }
+
+            menu.DropDown(rect);
+        }
+
+        /// <returns>本帧已移动行，调用方应停止继续绘制。</returns>
+        private bool DrawRowMoveButtons(ConfigTable table, int row, Rect rect)
+        {
+            float btnW = rect.width * 0.5f;
+            Rect up = new(rect.x, rect.y + 1f, btnW, rect.height - 2f);
+            Rect down = new(rect.x + btnW, rect.y + 1f, btnW, rect.height - 2f);
+            using (new EditorGUI.DisabledScope(row <= 0))
+            {
+                if (GUI.Button(up, new GUIContent("↑", UniConfigLoc.T("row.move_up")), EditorStyles.miniButtonLeft))
+                {
+                    MoveRow(table, row, row - 1);
+                    return true;
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(table.items == null || row >= table.items.Count - 1))
+            {
+                if (GUI.Button(down, new GUIContent("↓", UniConfigLoc.T("row.move_down")), EditorStyles.miniButtonRight))
+                {
+                    MoveRow(table, row, row + 1);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool DrawRowDeleteButton(ConfigTable table, int row, Rect rect)
+        {
+            const float size = 14f;
+            Rect button = new(
+                rect.x + (rect.width - size) * 0.5f,
+                rect.y + (rect.height - size) * 0.5f,
+                size,
+                size);
+            if (!GUI.Button(button, "×", _rowDeleteStyle))
+                return false;
+            if (!EditorUtility.DisplayDialog(UniConfigLoc.T("delete_row.title"),
+                    UniConfigLoc.F("delete_row.confirm", row + 1),
+                    UniConfigLoc.T("delete"), UniConfigLoc.T("cancel")))
+                return false;
+
+            DeleteRowByIndex(table, row + 1);
+            return true;
+        }
+
+        private void MoveRow(ConfigTable table, int from, int to)
+        {
+            if (table?.items == null || from == to)
+                return;
+            if (from < 0 || to < 0 || from >= table.items.Count || to >= table.items.Count)
+                return;
+
+            ConfigItem item = table.items[from];
+            table.items.RemoveAt(from);
+            table.items.Insert(to, item);
+            EditorConfigMgr.EnsureAutoRowId(table);
+            ConstraintEvaluator.RecalculateRowFormulas(table, from);
+            ConstraintEvaluator.RecalculateRowFormulas(table, to);
+            table.MarkFkValidationDirty();
+            ConstraintEvaluator.EnsureForeignKeyState(table);
+            _dirty = true;
+            MarkSearchDirty();
         }
 
         private void DrawSpreadsheetHeaderBlock(
@@ -1280,10 +1463,17 @@ namespace UniConfig.Editor
             float y = yStart;
             columnOpsChanged = false;
 
-            DrawCellBackground(new Rect(x0, y, IndexColWidth, HeaderRowHeight), HeaderBg, true);
-            GUI.Label(new Rect(x0, y, IndexColWidth, HeaderRowHeight), "#", _headerStyle);
+            float x = x0;
+            if (ShowColorTag(table))
+            {
+                DrawCellBackground(new Rect(x, y, ColorTagColWidth, HeaderRowHeight), HeaderBg, true);
+                x += ColorTagColWidth;
+            }
 
-            float x = x0 + IndexColWidth;
+            float indexWidth = IndexColumnWidth(table);
+            DrawCellBackground(new Rect(x, y, indexWidth, HeaderRowHeight), HeaderBg, true);
+            GUI.Label(new Rect(x, y, indexWidth, HeaderRowHeight), "#", _headerStyle);
+            x += indexWidth;
             foreach (int fi in visibleFieldIndices)
             {
                 ConfigField field = table.fields[fi];
@@ -1321,9 +1511,11 @@ namespace UniConfig.Editor
 
             y += HeaderRowHeight;
 
-            DrawCellBackground(new Rect(x0, y, IndexColWidth, RowHeight), HeaderBg, true);
-            GUI.Label(new Rect(x0, y, IndexColWidth, RowHeight), UniConfigLoc.T("type"), _headerStyle);
-            x = x0 + IndexColWidth;
+            x = x0;
+            float prefix = (ShowColorTag(table) ? ColorTagColWidth : 0f) + IndexColumnWidth(table);
+            DrawCellBackground(new Rect(x, y, prefix, RowHeight), HeaderBg, true);
+            GUI.Label(new Rect(x, y, prefix, RowHeight), UniConfigLoc.T("type"), _headerStyle);
+            x += prefix;
             foreach (int fi in visibleFieldIndices)
             {
                 ConfigField field = table.fields[fi];
@@ -1366,8 +1558,11 @@ namespace UniConfig.Editor
 
             y += RowHeight;
 
-            DrawCellBackground(new Rect(x0, y, IndexColWidth, OpsRowHeight), HeaderBg, true);
-            x = x0 + IndexColWidth;
+            x = x0;
+            float opsPrefix = (ShowColorTag(table) ? ColorTagColWidth : 0f) + IndexColumnWidth(table);
+            DrawCellBackground(new Rect(x, y, opsPrefix, OpsRowHeight), HeaderBg, true);
+            GUI.Label(new Rect(x, y, opsPrefix, OpsRowHeight), ShowColorTag(table) ? "tag / row" : "row", _headerStyle);
+            x += opsPrefix;
             foreach (int fi in visibleFieldIndices)
             {
                 Rect op = new(x, y, ColWidth, OpsRowHeight);
@@ -1683,7 +1878,6 @@ namespace UniConfig.Editor
                     SaveVisibleColumns(table);
             }
 
-            _deleteRowInput = string.Empty;
             _searchColumnsInitialized = true;
             _visibleColumnsInitialized = true;
         }
@@ -1755,6 +1949,163 @@ namespace UniConfig.Editor
             EditorGUI.DrawRect(r, GridLine);
         }
 
+        /// <returns>单元格数值发生变化。</returns>
+        private bool DrawRangeCell(
+            Rect rect,
+            ConfigTable table,
+            int row,
+            ConfigField field,
+            ConfigItem item,
+            double rangeMin,
+            double rangeMax)
+        {
+            const float dragWidth = 16f;
+            Rect dragRect = new(rect.x, rect.y, Mathf.Min(dragWidth, rect.width), rect.height);
+            Rect textRect = new(
+                dragRect.xMax,
+                rect.y,
+                Mathf.Max(0f, rect.width - dragRect.width),
+                rect.height);
+            string controlName = "UniConfigRange_" + field.name + "_" + row;
+            string stored = item.GetValue(field.name) ?? string.Empty;
+            bool integer = ConstraintEvaluator.IsScalarNumeric(field.type, out bool isInteger) && isInteger;
+            int id = GUIUtility.GetControlID("UniConfigRangeDrag".GetHashCode(), FocusType.Passive, dragRect);
+            Event evt = Event.current;
+            bool changed = false;
+            bool dragging = _rangeDragActive && GUIUtility.hotControl == id;
+
+            if (_rangeDragActive && GUIUtility.hotControl == 0)
+            {
+                _rangeDragActive = false;
+                EditorGUIUtility.SetWantsMouseJumping(0);
+            }
+
+            switch (evt.GetTypeForControl(id))
+            {
+                case EventType.MouseDown:
+                    if (evt.button == 0 && dragRect.Contains(evt.mousePosition))
+                    {
+                        if (_rangeEditKey == controlName &&
+                            ConstraintEvaluator.TryParseScalar(_rangeEditText, out double pending))
+                        {
+                            double clampedPending =
+                                ConstraintEvaluator.ClampScalar(pending, rangeMin, rangeMax, field.type);
+                            changed |= CommitRangeValue(table, row, field, item, stored, clampedPending);
+                            stored = item.GetValue(field.name) ?? string.Empty;
+                        }
+
+                        _rangeEditKey = null;
+                        GUIUtility.hotControl = id;
+                        GUIUtility.keyboardControl = 0;
+                        _rangeDragActive = true;
+                        EditorGUIUtility.SetWantsMouseJumping(1);
+                        bool parsedOk = ConstraintEvaluator.TryParseScalar(stored, out double parsed);
+                        double start = parsedOk ? parsed : rangeMin;
+                        _rangeDragValue = ConstraintEvaluator.ClampScalar(start, rangeMin, rangeMax, field.type);
+                        if (parsedOk && _rangeDragValue != start)
+                            changed |= CommitRangeValue(table, row, field, item, stored, _rangeDragValue);
+                        evt.Use();
+                    }
+
+                    break;
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl == id)
+                    {
+                        _rangeDragValue += ConstraintEvaluator.RangeDragDelta(
+                            rangeMin, rangeMax, evt.delta.x, integer);
+                        _rangeDragValue = ConstraintEvaluator.ClampScalar(
+                            _rangeDragValue, rangeMin, rangeMax, field.type);
+                        changed |= CommitRangeValue(table, row, field, item, item.GetValue(field.name), _rangeDragValue);
+                        evt.Use();
+                    }
+
+                    break;
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl == id && evt.button == 0)
+                    {
+                        GUIUtility.hotControl = 0;
+                        _rangeDragActive = false;
+                        EditorGUIUtility.SetWantsMouseJumping(0);
+                        evt.Use();
+                    }
+
+                    break;
+            }
+
+            dragging = _rangeDragActive && GUIUtility.hotControl == id;
+            stored = item.GetValue(field.name) ?? string.Empty;
+
+            if (evt.type == EventType.Repaint)
+            {
+                EditorGUI.DrawRect(dragRect, EditorGUIUtility.isProSkin
+                    ? new Color(0.40f, 0.62f, 0.95f, dragging ? 0.75f : 0.45f)
+                    : new Color(0.25f, 0.45f, 0.75f, dragging ? 0.55f : 0.35f));
+            }
+
+            GUI.Label(dragRect, "↔", _headerStyle);
+            EditorGUIUtility.AddCursorRect(dragRect, MouseCursor.SlideArrow);
+
+            bool editing = _rangeEditKey == controlName;
+            string shown = stored;
+            if (dragging)
+                shown = ConstraintEvaluator.FormatScalar(_rangeDragValue, field.type);
+            else if (editing)
+                shown = _rangeEditText;
+
+            GUI.SetNextControlName(controlName);
+            EditorGUI.BeginChangeCheck();
+            string typed = EditorGUI.TextField(textRect, shown, _cellStyle);
+            bool textChanged = EditorGUI.EndChangeCheck();
+            bool focusedNow = string.Equals(GUI.GetNameOfFocusedControl(), controlName, StringComparison.Ordinal);
+
+            if (dragging)
+            {
+                _rangeEditKey = null;
+            }
+            else if (textChanged && focusedNow)
+            {
+                _rangeEditKey = controlName;
+                _rangeEditText = typed;
+                if (ConstraintEvaluator.TryParseScalar(typed, out double typedValue))
+                {
+                    double clamped = ConstraintEvaluator.ClampScalar(typedValue, rangeMin, rangeMax, field.type);
+                    changed |= CommitRangeValue(table, row, field, item, item.GetValue(field.name), clamped);
+                    if (clamped != typedValue)
+                        _rangeEditText = ConstraintEvaluator.FormatScalar(clamped, field.type);
+                }
+            }
+            else if (editing && !focusedNow)
+            {
+                if (ConstraintEvaluator.TryParseScalar(_rangeEditText, out double typedValue))
+                {
+                    double clamped = ConstraintEvaluator.ClampScalar(typedValue, rangeMin, rangeMax, field.type);
+                    changed |= CommitRangeValue(table, row, field, item, item.GetValue(field.name), clamped);
+                }
+
+                _rangeEditKey = null;
+            }
+
+            return changed;
+        }
+
+        private static bool CommitRangeValue(
+            ConfigTable table,
+            int row,
+            ConfigField field,
+            ConfigItem item,
+            string stored,
+            double value)
+        {
+            string formatted = ConstraintEvaluator.FormatScalar(value, field.type);
+            if (string.Equals(stored, formatted, StringComparison.Ordinal))
+                return false;
+            item.SetValue(field.name, formatted);
+            ConstraintEvaluator.RecalculateRowFormulas(table, row);
+            table.MarkFkValidationDirty();
+            ConstraintEvaluator.EnsureForeignKeyState(table);
+            return true;
+        }
+
         private void DrawCellBackground(Rect rect, Color color, bool border)
         {
             if (Event.current.type != EventType.Repaint) return;
@@ -1798,6 +2149,20 @@ namespace UniConfig.Editor
                 alignment = TextAnchor.MiddleCenter,
                 fontSize = 10
             };
+
+            _rowDeleteStyle = new GUIStyle(EditorStyles.miniButton)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0)
+            };
+            Color deleteRed = new(0.86f, 0.28f, 0.28f);
+            _rowDeleteStyle.normal.textColor = deleteRed;
+            _rowDeleteStyle.hover.textColor = deleteRed;
+            _rowDeleteStyle.active.textColor = deleteRed;
+            _rowDeleteStyle.focused.textColor = deleteRed;
 
             _treeItemStyle = new GUIStyle(EditorStyles.label)
             {

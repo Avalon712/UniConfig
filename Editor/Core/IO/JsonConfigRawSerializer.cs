@@ -213,7 +213,7 @@ namespace UniConfig.Editor
                 if (slice != null)
                     foreach (ConfigItem item in slice)
                     {
-                        ItemDto itemDto = new();
+                        ItemDto itemDto = new() { colorTag = item.colorTag };
                         if (table.fields != null && table.fields.Count > 0)
                             foreach (ConfigField field in table.fields)
                                 itemDto.entries.Add(new EntryDto
@@ -262,7 +262,7 @@ namespace UniConfig.Editor
                 if (items == null) return;
                 foreach (ItemDto itemDto in items)
                 {
-                    ConfigItem item = new();
+                    ConfigItem item = new() { colorTag = itemDto.colorTag };
                     if (itemDto.entries != null)
                         foreach (EntryDto entry in itemDto.entries)
                             item.SetValue(entry.key, entry.value);
@@ -289,6 +289,8 @@ namespace UniConfig.Editor
             public string fkField;
             public string expression;
             public string lookupKeyField;
+            public double rangeMin;
+            public double rangeMax;
 
             public static ConstraintDto FromConstraint(FieldConstraint c)
             {
@@ -300,7 +302,9 @@ namespace UniConfig.Editor
                     fkTable = c.fkTable ?? string.Empty,
                     fkField = c.fkField ?? string.Empty,
                     expression = c.expression ?? string.Empty,
-                    lookupKeyField = string.IsNullOrEmpty(c.lookupKeyField) ? "id" : c.lookupKeyField
+                    lookupKeyField = string.IsNullOrEmpty(c.lookupKeyField) ? "id" : c.lookupKeyField,
+                    rangeMin = c.rangeMin,
+                    rangeMax = c.rangeMax
                 };
             }
 
@@ -314,7 +318,9 @@ namespace UniConfig.Editor
                     fkTable = fkTable ?? string.Empty,
                     fkField = fkField ?? string.Empty,
                     expression = expression ?? string.Empty,
-                    lookupKeyField = string.IsNullOrEmpty(lookupKeyField) ? "id" : lookupKeyField
+                    lookupKeyField = string.IsNullOrEmpty(lookupKeyField) ? "id" : lookupKeyField,
+                    rangeMin = rangeMin,
+                    rangeMax = rangeMax
                 };
             }
         }
@@ -322,6 +328,7 @@ namespace UniConfig.Editor
         [Serializable]
         private sealed class ItemDto
         {
+            public int colorTag;
             public List<EntryDto> entries = new();
         }
 

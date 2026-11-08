@@ -92,6 +92,7 @@ https://github.com/Avalon712/UniConfig.git
 | StreamingAssets 导出目录 | `StreamingAssetsExporter` 输出目录 | `Assets/StreamingAssets` |
 | 自定义枚举类型              | 完整类型名列表（`List`），会出现在字段类型菜单中    | （空）                      |
 | 自动创建 id 字段           | 每张表自动维护 `id`（int，值=行号，从 1 开始）   | 关                        |
+| 行颜色标记                | 编辑器行标记颜色列表，不写入导出配置             | 红 / 橙 / 黄 / 绿 / 蓝        |
 
 导出文件名固定为 **`configs.bytes`**。
 
@@ -100,6 +101,8 @@ https://github.com/Avalon712/UniConfig.git
 1. 打开 `UniConfig` → `Config Editor`
 2. 新建**模块**、在模块下新建**表**，编辑字段与行数据  
    - 模块仅用于编辑器内管理，**导出后运行时不再有模块概念**
+   - 行号左侧的色块是行颜色标记（颜色列表在 Settings 中配置），点开后从列表里选。工具栏 **颜色** 可按表隐藏该列，默认显示
+   - 工具栏勾选 **调序** 后，行号右侧才出现 `↑` / `↓`。再勾选 **删行** 后，调序按钮后面出现 `×`，点击并确认后删除该行。两个开关都按表记住，默认关闭。若开启了自动 id，行号会随顺序变化重写
 3. 为每个模块选择导出器（下拉框）：
    - **`ResourcesExporter`**：导出到 Resources
    - **`StreamingAssetsExporter`**：导出到 StreamingAssets（大表推荐）
@@ -197,6 +200,7 @@ https://github.com/Avalon712/UniConfig.git
 
 - **外键**：引用另一张表某字段的取值
 - **公式**：用表达式自动计算字段（可跨表引用）
+- **范围**：整数或浮点列限制在最小值和最大值之间。该列单元格左侧出现 ↔，按住左右拖可改数值，鼠标移动越快数值变化越快；也可以直接输入，结果会限制在范围内
 
 ### 5. 编辑器界面状态
 
