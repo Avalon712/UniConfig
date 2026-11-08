@@ -112,6 +112,22 @@ https://github.com/Avalon712/UniConfig.git
 
 > 表名须全局唯一（跨模块也不能重名）。运行时按表唯一 Id 区分表。
 
+编辑器程序集里也可以用代码只往**已经存在**的表追加行，不能新建模块、表或字段。单元格文本与编辑器写法相同。追加后要自己保存；导出与工具栏「导出配置」相同。
+
+```csharp
+using System.Collections.Generic;
+using UniConfig.Editor;
+
+var row = new Dictionary<string, string>
+{
+    ["name"] = "item_100",
+    ["value"] = "10"
+};
+int rowNumber = ExternalConfigEditor.AddRow("Test2Module", "BigTable", row);
+ExternalConfigEditor.Save("Test2Module", "BigTable");
+ExternalConfigEditor.Export();
+```
+
 ### 3. 字段类型与单元格写法
 
 编辑器单元格一律填**字符串**；导出时按字段类型解析。空单元格使用该类型默认值（数值 `0`、`bool` 为 `false`、`string` 为空串、数组为空数组、Unity 向量为零向量 / `Quaternion.identity` / 透明色）。

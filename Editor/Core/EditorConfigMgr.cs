@@ -128,7 +128,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RemoveColorTagVisibilityForModule(moduleName);
             UniConfigEditorSettings.instance.RemoveRowReorderForModule(moduleName);
             UniConfigEditorSettings.instance.RemoveRowDeleteForModule(moduleName);
-            ConfigMgrEditor.NotifyEditorDataChanged();
+            ExternalConfigEditor.NotifyEditorDataChanged();
         }
 
         public static ConfigTable CreateTable(string moduleName, string tableName)
@@ -170,7 +170,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RemoveColorTagVisibility(moduleName, tableName);
             UniConfigEditorSettings.instance.RemoveRowReorder(moduleName, tableName);
             UniConfigEditorSettings.instance.RemoveRowDelete(moduleName, tableName);
-            ConfigMgrEditor.NotifyEditorDataChanged();
+            ExternalConfigEditor.NotifyEditorDataChanged();
         }
 
         public static void RenameTable(string moduleName, string oldName, string newName)
@@ -196,7 +196,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RenameRowReorderTable(moduleName, oldName, newName);
             UniConfigEditorSettings.instance.RenameRowDeleteTable(moduleName, oldName, newName);
             if (!table.dataLoaded)
-                ConfigMgrEditor.NotifyEditorDataChanged();
+                ExternalConfigEditor.NotifyEditorDataChanged();
         }
 
         public static void RenameModule(string oldName, string newName)
@@ -228,7 +228,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RenameRowReorderModule(oldName, newName);
             UniConfigEditorSettings.instance.RenameRowDeleteModule(oldName, newName);
             SaveModule(module);
-            ConfigMgrEditor.BeginSaveBatch();
+            ExternalConfigEditor.BeginSaveBatch();
             try
             {
                 foreach (ConfigTable table in module.tables)
@@ -237,7 +237,7 @@ namespace UniConfig.Editor
             }
             finally
             {
-                ConfigMgrEditor.EndSaveBatch();
+                ExternalConfigEditor.EndSaveBatch();
             }
         }
 
@@ -302,7 +302,7 @@ namespace UniConfig.Editor
             if (removed > 0)
                 Debug.Log($"[UniConfig] 保存 {table.moduleName}/{table.tableName} 时已跳过 {removed} 行空数据");
 
-            ConfigMgrEditor.NotifyEditorDataChanged();
+            ExternalConfigEditor.NotifyEditorDataChanged();
             return removed;
         }
 
@@ -332,7 +332,7 @@ namespace UniConfig.Editor
         public static int SaveAll()
         {
             EnsureLoaded();
-            ConfigMgrEditor.BeginSaveBatch();
+            ExternalConfigEditor.BeginSaveBatch();
             try
             {
                 int removed = 0;
@@ -352,7 +352,7 @@ namespace UniConfig.Editor
             }
             finally
             {
-                ConfigMgrEditor.EndSaveBatch();
+                ExternalConfigEditor.EndSaveBatch();
             }
         }
 
@@ -365,7 +365,7 @@ namespace UniConfig.Editor
                 return;
 
             EnsureLoaded();
-            ConfigMgrEditor.BeginSaveBatch();
+            ExternalConfigEditor.BeginSaveBatch();
             try
             {
                 foreach (ConfigModule module in _modules.Values)
@@ -383,7 +383,7 @@ namespace UniConfig.Editor
             }
             finally
             {
-                ConfigMgrEditor.EndSaveBatch();
+                ExternalConfigEditor.EndSaveBatch();
             }
         }
 

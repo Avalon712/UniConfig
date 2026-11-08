@@ -10,11 +10,12 @@ using UnityEngine;
 namespace UniConfig.Editor
 {
     /// <summary>
-    /// 编辑器模式下的配置读取入口：从 <c>Config/</c> 下已保存的表数据构建实例，
-    /// 不依赖导出的 <c>configs.bytes</c>。API 对齐 <see cref="ConfigMgr"/>。
+    /// 编辑器模式下的外部配置入口：从 <c>Config/</c> 下已保存的表数据构建实例，
+    /// 不依赖导出的 <c>configs.bytes</c>。读取 API 对齐 <see cref="ConfigMgr"/>。
     /// 缓存由本类内部维护：Unity 打开时自动加载，配置保存后自动刷新。
+    /// 写入只能往已经存在的表追加行，不会新建模块、表或字段。
     /// </summary>
-    public static class ConfigMgrEditor
+    public static class ExternalConfigEditor
     {
         private static Dictionary<int, object> _configsById;
         private static Dictionary<Type, int> _typeToTableId;
@@ -59,6 +60,69 @@ namespace UniConfig.Editor
                 _saveBatchDepth--;
             if (_saveBatchDepth == 0)
                 RefreshCacheSafe();
+        }
+
+        /// <summary>
+        /// 向已有表追加一行。单元格文本与编辑器里的写法相同。
+        /// 未给出的字段使用该列默认值。自动行号和公式字段由编辑器写回，传入值会被忽略。
+        /// 不会新建模块、表或字段。
+        /// </summary>
+        /// <returns>新行的行号，从 1 开始。</returns>
+        public static int AddRow(string moduleName, string tableName, IReadOnlyDictionary<string, string> values)
+        {
+            AddRows(moduleName, tableName, new[] { values });
+            ConfigTable table = RequireExistingTable(moduleName, tableName);
+            return table.items.Count;
+        }
+
+        /// <summary>
+        /// 向已有表一次追加多行。规则与 <see cref="AddRow"/> 相同。某一行不合法时，本次不会写入任何行。
+        /// </summary>
+        /// <returns>实际追加的行数。</returns>
+        public static int AddRows(
+            string moduleName,
+            string tableName,
+            IEnumerable<IReadOnlyDictionary<string, string>> rows)
+        {
+            if (rows == null) throw new ArgumentNullException(nameof(rows));
+
+            ConfigTable table = RequireExistingTable(moduleName, tableName);
+            if (table.fields == null || table.fields.Count == 0)
+                throw new InvalidOperationException($"表 {moduleName}/{tableName} 没有字段，不能追加数据");
+
+            List<ConfigItem> built = new();
+            foreach (IReadOnlyDictionary<string, string> row in rows)
+                built.Add(BuildRow(table, row));
+            if (built.Count == 0)
+                return 0;
+
+            table.items ??= new List<ConfigItem>();
+            int start = table.items.Count;
+            table.items.AddRange(built);
+            EditorConfigMgr.EnsureAutoRowId(table);
+            for (int i = 0; i < built.Count; i++)
+                ConstraintEvaluator.RecalculateRowFormulas(table, start + i);
+            table.cachedRowCount = table.items.Count;
+            table.MarkFkValidationDirty();
+            return built.Count;
+        }
+
+        /// <summary>
+        /// 把指定已有表写回 <c>Config/</c>。空行会被跳过。
+        /// </summary>
+        /// <returns>被跳过的空行数量。</returns>
+        public static int Save(string moduleName, string tableName)
+        {
+            ConfigTable table = RequireExistingTable(moduleName, tableName);
+            return EditorConfigMgr.SaveTable(table);
+        }
+
+        /// <summary>
+        /// 按当前导出器导出全部配置，与编辑器里的「导出配置」相同。
+        /// </summary>
+        public static void Export()
+        {
+            EditorConfigMgr.ExportConfigs();
         }
 
         public static void PrintAllTables()
@@ -139,6 +203,79 @@ namespace UniConfig.Editor
                     result.Add(config);
         }
 
+        private static ConfigTable RequireExistingTable(string moduleName, string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(moduleName))
+                throw new ArgumentException("模块名不能为空", nameof(moduleName));
+            if (string.IsNullOrWhiteSpace(tableName))
+                throw new ArgumentException("表名不能为空", nameof(tableName));
+
+            EditorConfigMgr.EnsureLoaded();
+            ConfigModule module = EditorConfigMgr.GetModule(moduleName);
+            if (module == null)
+                throw new InvalidOperationException($"模块不存在: {moduleName}。外部接口不能新建模块。");
+
+            ConfigTable table = module.FindTable(tableName);
+            if (table == null)
+                throw new InvalidOperationException(
+                    $"表不存在: {moduleName}/{tableName}。外部接口只能向已有表追加数据。");
+
+            EditorConfigMgr.EnsureTableDataLoaded(table);
+            if (!table.dataLoaded)
+                throw new InvalidOperationException($"表 {moduleName}/{tableName} 数据未能加载");
+            return table;
+        }
+
+        private static ConfigItem BuildRow(ConfigTable table, IReadOnlyDictionary<string, string> values)
+        {
+            if (values == null) throw new ArgumentNullException(nameof(values));
+
+            HashSet<string> known = new(StringComparer.Ordinal);
+            for (int i = 0; i < table.fields.Count; i++)
+            {
+                ConfigField field = table.fields[i];
+                if (field != null && !string.IsNullOrEmpty(field.name))
+                    known.Add(field.name);
+            }
+
+            foreach (string key in values.Keys)
+            {
+                if (string.IsNullOrEmpty(key) || !known.Contains(key))
+                    throw new InvalidOperationException(
+                        $"表 {table.moduleName}/{table.tableName} 不存在字段 {key}，不能新增字段");
+            }
+
+            ConfigItem item = new();
+            for (int i = 0; i < table.fields.Count; i++)
+            {
+                ConfigField field = table.fields[i];
+                if (field == null || string.IsNullOrEmpty(field.name))
+                    continue;
+                if (UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
+                    continue;
+                if (ConstraintEvaluator.IsFormulaField(table, field.name))
+                    continue;
+
+                string raw = values.TryGetValue(field.name, out string given) && given != null
+                    ? given
+                    : FieldUtils.GetDefaultCellString(field);
+                FieldUtils.ToValue(raw, field);
+                if (ConstraintEvaluator.TryGetRange(table, field, out double min, out double max) &&
+                    (ConstraintEvaluator.TryParseScalar(raw, out double number) ||
+                     string.IsNullOrWhiteSpace(raw)))
+                {
+                    if (string.IsNullOrWhiteSpace(raw))
+                        number = 0d;
+                    double clamped = ConstraintEvaluator.ClampScalar(number, min, max, field.type);
+                    raw = ConstraintEvaluator.FormatScalar(clamped, field.type);
+                }
+
+                item.SetValue(field.name, raw);
+            }
+
+            return item;
+        }
+
         private static void EnsureLoaded()
         {
             if (!_loaded)
@@ -156,7 +293,7 @@ namespace UniConfig.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UniConfig] ConfigMgrEditor 刷新失败: {ex.Message}");
+                Debug.LogWarning($"[UniConfig] ExternalConfigEditor 刷新失败: {ex.Message}");
             }
             finally
             {
@@ -196,7 +333,7 @@ namespace UniConfig.Editor
                     catch (Exception ex)
                     {
                         Debug.LogWarning(
-                            $"[UniConfig] ConfigMgrEditor 跳过表 {table.moduleName}/{table.tableName}: {ex.Message}");
+                            $"[UniConfig] ExternalConfigEditor 跳过表 {table.moduleName}/{table.tableName}: {ex.Message}");
                     }
                 }
             }
