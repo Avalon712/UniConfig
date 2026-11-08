@@ -112,7 +112,7 @@ https://github.com/Avalon712/UniConfig.git
 
 > 表名须全局唯一（跨模块也不能重名）。运行时按表唯一 Id 区分表。
 
-编辑器程序集里也可以用代码只往**已经存在**的表追加行，不能新建模块、表或字段。单元格文本与编辑器写法相同。追加后要自己保存；导出与工具栏「导出配置」相同。
+编辑器程序集里也可以用代码操作**已经存在**的表：追加行，或按行号增量修改字段。不能新建模块、表或字段。单元格文本与编辑器写法相同。改完后要自己保存；导出与工具栏「导出配置」相同。
 
 ```csharp
 using System.Collections.Generic;
@@ -124,6 +124,9 @@ var row = new Dictionary<string, string>
     ["value"] = "10"
 };
 int rowNumber = ExternalConfigEditor.AddRow("Test2Module", "BigTable", row);
+// 只改给出的字段，其余列保持原值。行号从 1 开始，与编辑器 # 列一致。
+ExternalConfigEditor.UpdateRow("Test2Module", "BigTable", rowNumber,
+    new Dictionary<string, string> { ["value"] = "20" });
 ExternalConfigEditor.Save("Test2Module", "BigTable");
 ExternalConfigEditor.Export();
 ```

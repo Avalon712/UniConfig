@@ -13,7 +13,7 @@ namespace UniConfig.Editor
     /// 编辑器模式下的外部配置入口：从 <c>Config/</c> 下已保存的表数据构建实例，
     /// 不依赖导出的 <c>configs.bytes</c>。读取 API 对齐 <see cref="ConfigMgr"/>。
     /// 缓存由本类内部维护：Unity 打开时自动加载，配置保存后自动刷新。
-    /// 写入只能往已经存在的表追加行，不会新建模块、表或字段。
+    /// 写入只能操作已经存在的表：追加行，或按行号增量修改字段。不会新建模块、表或字段。
     /// </summary>
     public static class ExternalConfigEditor
     {
@@ -105,6 +105,38 @@ namespace UniConfig.Editor
             table.cachedRowCount = table.items.Count;
             table.MarkFkValidationDirty();
             return built.Count;
+        }
+
+        /// <summary>
+        /// 修改已有表中指定行。行号从 1 开始，与编辑器中的 # 列一致，不是 tableId。
+        /// <paramref name="values"/> 只需包含要改的字段，未出现的字段保持原值；可以只改一个字段，也可以一次改完全部字段。
+        /// 自动行号和公式字段由编辑器写回，传入值会被忽略。不会新建字段。
+        /// </summary>
+        public static void UpdateRow(
+            string moduleName,
+            string tableName,
+            int rowNumber,
+            IReadOnlyDictionary<string, string> values)
+        {
+            if (values == null) throw new ArgumentNullException(nameof(values));
+            if (rowNumber <= 0)
+                throw new ArgumentOutOfRangeException(nameof(rowNumber), "行号从 1 开始");
+
+            ConfigTable table = RequireExistingTable(moduleName, tableName);
+            if (table.fields == null || table.fields.Count == 0)
+                throw new InvalidOperationException($"表 {moduleName}/{tableName} 没有字段，不能修改数据");
+            if (table.items == null || (uint)(rowNumber - 1) >= (uint)table.items.Count)
+                throw new ArgumentOutOfRangeException(nameof(rowNumber),
+                    $"表 {moduleName}/{tableName} 没有第 {rowNumber} 行");
+
+            int index = rowNumber - 1;
+            ConfigItem item = table.items[index] ?? new ConfigItem();
+            table.items[index] = item;
+            EnsureKnownFields(table, values);
+            ApplyFieldValues(table, item, values, false);
+            EditorConfigMgr.EnsureAutoRowId(table);
+            ConstraintEvaluator.RecalculateRowFormulas(table, index);
+            table.MarkFkValidationDirty();
         }
 
         /// <summary>
@@ -218,7 +250,7 @@ namespace UniConfig.Editor
             ConfigTable table = module.FindTable(tableName);
             if (table == null)
                 throw new InvalidOperationException(
-                    $"表不存在: {moduleName}/{tableName}。外部接口只能向已有表追加数据。");
+                    $"表不存在: {moduleName}/{tableName}。外部接口只能操作已有表。");
 
             EditorConfigMgr.EnsureTableDataLoaded(table);
             if (!table.dataLoaded)
@@ -229,7 +261,14 @@ namespace UniConfig.Editor
         private static ConfigItem BuildRow(ConfigTable table, IReadOnlyDictionary<string, string> values)
         {
             if (values == null) throw new ArgumentNullException(nameof(values));
+            EnsureKnownFields(table, values);
+            ConfigItem item = new();
+            ApplyFieldValues(table, item, values, true);
+            return item;
+        }
 
+        private static void EnsureKnownFields(ConfigTable table, IReadOnlyDictionary<string, string> values)
+        {
             HashSet<string> known = new(StringComparer.Ordinal);
             for (int i = 0; i < table.fields.Count; i++)
             {
@@ -244,8 +283,15 @@ namespace UniConfig.Editor
                     throw new InvalidOperationException(
                         $"表 {table.moduleName}/{table.tableName} 不存在字段 {key}，不能新增字段");
             }
+        }
 
-            ConfigItem item = new();
+        /// <param name="fillMissing">为 true 时，未给出的字段写入该列默认值；否则保持原值。</param>
+        private static void ApplyFieldValues(
+            ConfigTable table,
+            ConfigItem item,
+            IReadOnlyDictionary<string, string> values,
+            bool fillMissing)
+        {
             for (int i = 0; i < table.fields.Count; i++)
             {
                 ConfigField field = table.fields[i];
@@ -256,9 +302,15 @@ namespace UniConfig.Editor
                 if (ConstraintEvaluator.IsFormulaField(table, field.name))
                     continue;
 
-                string raw = values.TryGetValue(field.name, out string given) && given != null
+                bool provided = values.TryGetValue(field.name, out string given);
+                if (!provided && !fillMissing)
+                    continue;
+
+                string raw = provided && given != null
                     ? given
-                    : FieldUtils.GetDefaultCellString(field);
+                    : fillMissing
+                        ? FieldUtils.GetDefaultCellString(field)
+                        : string.Empty;
                 FieldUtils.ToValue(raw, field);
                 if (ConstraintEvaluator.TryGetRange(table, field, out double min, out double max) &&
                     (ConstraintEvaluator.TryParseScalar(raw, out double number) ||
@@ -272,8 +324,6 @@ namespace UniConfig.Editor
 
                 item.SetValue(field.name, raw);
             }
-
-            return item;
         }
 
         private static void EnsureLoaded()
