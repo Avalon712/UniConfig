@@ -90,7 +90,9 @@ namespace UniConfig.Editor
 
             // 分页 / 搜索 / 加载
             ["page_info"] = new[]
-                { "共 {0} 行{1}  ·  每页 {2}  ·  第 {3}/{4} 页", "Total {0} rows{1}  ·  {2}/page  ·  Page {3}/{4}" },
+                { "共 {0} 行{1}", "Total {0} rows{1}" },
+            ["page_size"] = new[] { "每页", "Per page" },
+            ["page_index"] = new[] { "第 {0}/{1} 页", "Page {0}/{1}" },
             ["match_count"] = new[] { "（匹配 {0}）", " (matched {0})" },
             ["searching_tag"] = new[] { "（搜索中…）", " (searching…)" },
             ["searching_help"] = new[]

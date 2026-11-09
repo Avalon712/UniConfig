@@ -16,7 +16,7 @@ namespace UniConfig.Editor
         public const string ModuleMetaFileName = "module.json";
 
         /// <summary>
-        /// 单个切片文件最多存储的数据行数（也是编辑器每页显示行数）。
+        /// 单个切片文件最多存储的数据行数。编辑器每页行数另行按表配置。
         /// </summary>
         public const int ShardRowLimit = 500;
 

@@ -860,7 +860,7 @@ namespace UniConfig.Editor
 
         private void DrawPaginationBar(ConfigTable table, bool interactive)
         {
-            int pageSize = ConfigPaths.ShardRowLimit;
+            int pageSize = GetPageSize(table);
             List<int> matched = _displayRowIndices ?? new List<int>();
             int total = matched.Count;
             int pageCount = total == 0
@@ -879,9 +879,30 @@ namespace UniConfig.Editor
             if (_isSearching || (_searchDirty && !string.IsNullOrEmpty(_dataSearch)))
                 matchInfo = UniConfigLoc.T("searching_tag");
 
-            GUILayout.Label(
-                UniConfigLoc.F("page_info", table.items.Count, matchInfo, pageSize, _dataPageIndex + 1, pageCount),
-                EditorStyles.miniLabel);
+            GUILayout.Label(UniConfigLoc.F("page_info", table.items.Count, matchInfo), EditorStyles.miniLabel);
+            GUILayout.Space(8);
+            GUILayout.Label(UniConfigLoc.T("page_size"), EditorStyles.miniLabel);
+            using (new EditorGUI.DisabledScope(!interactive))
+            {
+                EditorGUI.BeginChangeCheck();
+                int edited = EditorGUILayout.DelayedIntField(pageSize, EditorStyles.toolbarTextField,
+                    GUILayout.Width(52));
+                if (EditorGUI.EndChangeCheck())
+                {
+                    int firstRow = _dataPageIndex * pageSize;
+                    UniConfigEditorSettings.instance.SetPageSize(table.moduleName, table.tableName, edited);
+                    pageSize = GetPageSize(table);
+                    _dataPageIndex = pageSize <= 0 ? 0 : firstRow / pageSize;
+                    pageCount = total == 0
+                        ? 1
+                        : Mathf.Max(1, Mathf.CeilToInt(total / (float)pageSize));
+                    if (_dataPageIndex >= pageCount)
+                        _dataPageIndex = pageCount - 1;
+                }
+            }
+
+            GUILayout.Space(8);
+            GUILayout.Label(UniConfigLoc.F("page_index", _dataPageIndex + 1, pageCount), EditorStyles.miniLabel);
 
             GUILayout.FlexibleSpace();
 
@@ -930,6 +951,13 @@ namespace UniConfig.Editor
             }
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        private static int GetPageSize(ConfigTable table)
+        {
+            if (table == null)
+                return UniConfigEditorSettings.DefaultPageSize;
+            return UniConfigEditorSettings.instance.GetPageSize(table.moduleName, table.tableName);
         }
 
         private void SetDataPageIndex(int pageIndex)
@@ -994,7 +1022,7 @@ namespace UniConfig.Editor
                     table.cachedRowCount = table.items.Count;
                     EditorConfigMgr.EnsureAutoRowId(table);
                     ConstraintEvaluator.RecalculateRowFormulas(table, table.items.Count - 1);
-                    _dataPageIndex = Mathf.Max(0, (table.items.Count - 1) / ConfigPaths.ShardRowLimit);
+                    _dataPageIndex = Mathf.Max(0, (table.items.Count - 1) / GetPageSize(table));
                     _dirty = true;
                     MarkSearchDirty();
                 }
@@ -1076,7 +1104,7 @@ namespace UniConfig.Editor
             GUI.FocusControl(null);
             MarkSearchDirty();
 
-            int pageSize = ConfigPaths.ShardRowLimit;
+            int pageSize = GetPageSize(table);
             int pageCount = Mathf.Max(1, Mathf.CeilToInt(table.items.Count / (float)pageSize));
             if (_dataPageIndex >= pageCount)
                 _dataPageIndex = pageCount - 1;
@@ -1179,7 +1207,7 @@ namespace UniConfig.Editor
             const float OpsRowHeight = 24f;
             float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices.Count);
             List<int> matched = _displayRowIndices ?? new List<int>();
-            int pageSize = ConfigPaths.ShardRowLimit;
+            int pageSize = GetPageSize(table);
             int pageCount = matched.Count == 0
                 ? 1
                 : Mathf.Max(1, Mathf.CeilToInt(matched.Count / (float)pageSize));

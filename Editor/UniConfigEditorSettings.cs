@@ -81,12 +81,23 @@ namespace UniConfig.Editor
         public List<TableColorTagVisibility> rowDeleteVisibility = new();
 
         /// <summary>
+        /// 每张表编辑器里一页显示多少行。没有记录时使用 <see cref="DefaultPageSize"/>。
+        /// </summary>
+        public List<TablePageSize> pageSizeEntries = new();
+
+        /// <summary>
         /// 编辑器界面语言：0=中文，1=English（默认中文）
         /// </summary>
         public int editorLanguage;
 
         /// <summary>自动行号字段名。运行时 <c>GetConfigById</c> 的 Id 即该字段的值。</summary>
         public const string AutoRowIdFieldName = "id";
+
+        /// <summary>未单独设置时，编辑器每页行数。</summary>
+        public const int DefaultPageSize = 500;
+
+        /// <summary>编辑器每页行数上限，避免一次画出过多行。</summary>
+        public const int MaxPageSize = 10000;
 
         public bool IsAutoRowIdField(string fieldName)
         {
@@ -175,6 +186,91 @@ namespace UniConfig.Editor
 
             rowColorTagsInitialized = true;
             SaveSettings();
+        }
+
+        public int GetPageSize(string moduleName, string tableName)
+        {
+            TablePageSize entry = FindPageSize(moduleName, tableName);
+            if (entry == null || entry.pageSize < 1)
+                return DefaultPageSize;
+            return Mathf.Clamp(entry.pageSize, 1, MaxPageSize);
+        }
+
+        public void SetPageSize(string moduleName, string tableName, int pageSize)
+        {
+            if (string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
+                return;
+
+            pageSize = Mathf.Clamp(pageSize, 1, MaxPageSize);
+            pageSizeEntries ??= new List<TablePageSize>();
+            TablePageSize entry = FindPageSize(moduleName, tableName);
+            if (pageSize == DefaultPageSize)
+            {
+                if (entry == null)
+                    return;
+                pageSizeEntries.Remove(entry);
+                SaveSettings();
+                return;
+            }
+
+            if (entry == null)
+            {
+                entry = new TablePageSize { moduleName = moduleName, tableName = tableName };
+                pageSizeEntries.Add(entry);
+            }
+
+            if (entry.pageSize == pageSize)
+                return;
+            entry.pageSize = pageSize;
+            SaveSettings();
+        }
+
+        public void RenamePageSizeTable(string moduleName, string oldTableName, string newTableName)
+        {
+            TablePageSize entry = FindPageSize(moduleName, oldTableName);
+            if (entry == null)
+                return;
+            entry.tableName = newTableName;
+            SaveSettings();
+        }
+
+        public void RenamePageSizeModule(string oldModuleName, string newModuleName)
+        {
+            if (pageSizeEntries == null)
+                return;
+            bool changed = false;
+            foreach (TablePageSize entry in pageSizeEntries)
+            {
+                if (entry == null || !string.Equals(entry.moduleName, oldModuleName, StringComparison.Ordinal))
+                    continue;
+                entry.moduleName = newModuleName;
+                changed = true;
+            }
+
+            if (changed)
+                SaveSettings();
+        }
+
+        public void RemovePageSize(string moduleName, string tableName)
+        {
+            if (pageSizeEntries == null)
+                return;
+            int removed = pageSizeEntries.RemoveAll(entry =>
+                entry != null &&
+                string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal) &&
+                string.Equals(entry.tableName, tableName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
+        }
+
+        public void RemovePageSizeForModule(string moduleName)
+        {
+            if (pageSizeEntries == null)
+                return;
+            int removed = pageSizeEntries.RemoveAll(entry =>
+                entry != null && string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal));
+            if (removed > 0)
+                SaveSettings();
         }
 
         public bool GetShowRowDelete(string moduleName, string tableName)
@@ -324,6 +420,23 @@ namespace UniConfig.Editor
             Save(true);
         }
 
+        private TablePageSize FindPageSize(string moduleName, string tableName)
+        {
+            if (pageSizeEntries == null || string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
+                return null;
+            for (int i = 0; i < pageSizeEntries.Count; i++)
+            {
+                TablePageSize entry = pageSizeEntries[i];
+                if (entry == null)
+                    continue;
+                if (string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal) &&
+                    string.Equals(entry.tableName, tableName, StringComparison.Ordinal))
+                    return entry;
+            }
+
+            return null;
+        }
+
         private TableVisibleColumns FindVisibleColumns(string moduleName, string tableName)
         {
             if (visibleColumnEntries == null || string.IsNullOrEmpty(moduleName) || string.IsNullOrEmpty(tableName))
@@ -445,6 +558,14 @@ namespace UniConfig.Editor
         public string moduleName;
         public string tableName;
         public bool visible = true;
+    }
+
+    [Serializable]
+    public sealed class TablePageSize
+    {
+        public string moduleName;
+        public string tableName;
+        public int pageSize = UniConfigEditorSettings.DefaultPageSize;
     }
 
     [Serializable]
