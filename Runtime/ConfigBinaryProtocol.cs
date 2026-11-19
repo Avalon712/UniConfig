@@ -56,7 +56,7 @@ namespace UniConfig
 
                 if (!HasMagic(data, offset, Magic))
                     throw new InvalidDataException(
-                        $"配置文件魔数不匹配，期望 UCFG，实际 {(char)data[offset]}{(char)data[offset + 1]}{(char)data[offset + 2]}{(char)data[offset + 3]}");
+                        $"配置文件魔数不匹配，期望 UCFG，实际 {data[offset]:X2} {data[offset + 1]:X2} {data[offset + 2]:X2} {data[offset + 3]:X2}");
 
                 offset += 4;
 

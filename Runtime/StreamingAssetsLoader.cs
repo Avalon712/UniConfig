@@ -222,7 +222,7 @@ namespace UniConfig
 
                 if (!Matches(buffer, offset, ConfigBinaryProtocol.Magic))
                     throw new InvalidDataException(
-                        $"配置文件魔数不匹配，期望 UCFG，实际 {(char)buffer[offset]}{(char)buffer[offset + 1]}{(char)buffer[offset + 2]}{(char)buffer[offset + 3]}");
+                        $"配置文件魔数不匹配，期望 UCFG，实际 {buffer[offset]:X2} {buffer[offset + 1]:X2} {buffer[offset + 2]:X2} {buffer[offset + 3]:X2}");
 
                 offset += 4;
                 _state = State.NeedTableId;
@@ -313,8 +313,11 @@ namespace UniConfig
 
                 if (_payloadFilled == 0 && available >= _payloadLength)
                 {
-                    ConsumePayload(new ReadOnlySpan<byte>(buffer, offset, _payloadLength));
-                    offset += _payloadLength;
+                    // ConsumePayload 会清掉 _payloadLength。先推进游标，否则下一段魔数会落在这块数据上。
+                    int length = _payloadLength;
+                    ReadOnlySpan<byte> payload = new ReadOnlySpan<byte>(buffer, offset, length);
+                    offset += length;
+                    ConsumePayload(payload);
                     return true;
                 }
 
