@@ -249,7 +249,7 @@ namespace UniConfig.Editor
         private static void AppendInterpolatedToString(StringBuilder sb, string indent, string className,
             IReadOnlyList<ConfigField> fields)
         {
-            sb.Append(indent).Append("return $\"{nameof(").Append(className).Append(")}@{GetHashCode()}{{");
+            sb.Append(indent).Append("return $\"{nameof(").Append(className).Append(")}@{GetHashCode():X8}{{");
             if (fields != null)
             {
                 for (int i = 0; i < fields.Count; i++)
