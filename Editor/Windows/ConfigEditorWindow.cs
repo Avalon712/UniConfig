@@ -396,6 +396,10 @@ namespace UniConfig.Editor
                         "d_Toolbar Plus"))
                     CreateTableAndRename(_selectedModule);
 
+                if (ToolbarButton(UniConfigLoc.T("add_misc_table"), UniConfigLoc.T("add_misc_table.tip"),
+                        "Toolbar Plus", "d_Toolbar Plus"))
+                    CreateTableAndRename(_selectedModule, true);
+
                 if (ToolbarButton(UniConfigLoc.T("rename"), UniConfigLoc.T("rename_module.tip"), "editicon.sml",
                         "d_editicon.sml"))
                     BeginRenameModule(_selectedModule);
@@ -513,7 +517,9 @@ namespace UniConfig.Editor
                 GUI.DrawTexture(iconRect, icon, ScaleMode.ScaleToFit);
 
             Rect labelRect = new(rect.x + 42, rect.y, rect.width - 44, rect.height);
-            string label = table.tableName;
+            string label = table.misc
+                ? table.tableName + " · " + UniConfigLoc.T("misc_table")
+                : table.tableName;
 
             if (_renameTarget == RenameTarget.Table &&
                 _renameModule == module.moduleName &&
@@ -549,7 +555,7 @@ namespace UniConfig.Editor
             });
         }
 
-        private void CreateTableAndRename(string moduleName)
+        private void CreateTableAndRename(string moduleName, bool misc = false)
         {
             if (string.IsNullOrEmpty(moduleName))
             {
@@ -560,7 +566,7 @@ namespace UniConfig.Editor
             TryAction(() =>
             {
                 string name = EditorConfigMgr.GenerateUniqueTableName(moduleName);
-                ConfigTable table = EditorConfigMgr.CreateTable(moduleName, name);
+                ConfigTable table = EditorConfigMgr.CreateTable(moduleName, name, misc);
                 _expandedModules.Add(moduleName);
                 SelectTable(moduleName, table.tableName);
                 BeginRenameTable(moduleName, table.tableName);
@@ -978,6 +984,9 @@ namespace UniConfig.Editor
 
         private void DrawDataToolbar(ConfigModule module, ConfigTable table)
         {
+            if (table != null && table.misc && table.dataLoaded && MiscTableSchema.EnsureColumns(table))
+                _dirty = true;
+
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             string exportClass = string.IsNullOrEmpty(table.mapCsharpTypeFullName)
                 ? UniConfigLoc.T("not_exported")
@@ -1008,9 +1017,12 @@ namespace UniConfig.Editor
                             : UniConfigLoc.F("status.saved_table", module.moduleName, table.tableName);
                     });
 
-                if (ToolbarButton(UniConfigLoc.T("add_field"), UniConfigLoc.T("add_field.tip"), "Toolbar Plus",
-                        "d_Toolbar Plus"))
-                    AddField(table);
+                using (new EditorGUI.DisabledScope(table.misc))
+                {
+                    if (ToolbarButton(UniConfigLoc.T("add_field"), UniConfigLoc.T("add_field.tip"), "Toolbar Plus",
+                            "d_Toolbar Plus"))
+                        AddField(table);
+                }
 
                 if (ToolbarButton(UniConfigLoc.T("add_row"), UniConfigLoc.T("add_row.tip"), "Toolbar Plus",
                         "d_Toolbar Plus"))
@@ -1018,6 +1030,10 @@ namespace UniConfig.Editor
                     ConfigItem item = new();
                     foreach (ConfigField field in table.fields)
                         item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
+                    if (table.misc)
+                        item.SetValue(MiscTableSchema.TypeField,
+                            MiscTableSchema.FormatType(new ConfigField(MiscTableSchema.ValueField,
+                                SupportableFieldType.Int32)));
                     table.items.Add(item);
                     table.cachedRowCount = table.items.Count;
                     EditorConfigMgr.EnsureAutoRowId(table);
@@ -1027,9 +1043,12 @@ namespace UniConfig.Editor
                     MarkSearchDirty();
                 }
 
-                if (ToolbarButton(UniConfigLoc.T("constraint.open"), UniConfigLoc.T("constraint.open.tip"),
-                        "FilterByType", "d_FilterByType"))
-                    ConstraintEditorWindow.Open(table);
+                using (new EditorGUI.DisabledScope(table.misc))
+                {
+                    if (ToolbarButton(UniConfigLoc.T("constraint.open"), UniConfigLoc.T("constraint.open.tip"),
+                            "FilterByType", "d_FilterByType"))
+                        ConstraintEditorWindow.Open(table);
+                }
             }
 
             EditorGUILayout.EndHorizontal();
@@ -1072,10 +1091,13 @@ namespace UniConfig.Editor
             GUILayout.FlexibleSpace();
 
             GUILayout.Space(6);
-            DrawColumnMaskField(null, table, _columnsToDelete, false);
-            if (ToolbarButton(UniConfigLoc.T("delete_col"), UniConfigLoc.T("delete_col.tip"), "TreeEditor.Trash",
-                    "d_TreeEditor.Trash"))
-                DeleteSelectedColumns(table);
+            using (new EditorGUI.DisabledScope(table.misc))
+            {
+                DrawColumnMaskField(null, table, _columnsToDelete, false);
+                if (ToolbarButton(UniConfigLoc.T("delete_col"), UniConfigLoc.T("delete_col.tip"), "TreeEditor.Trash",
+                        "d_TreeEditor.Trash"))
+                    DeleteSelectedColumns(table);
+            }
 
             EditorGUILayout.EndHorizontal();
         }
@@ -1112,6 +1134,8 @@ namespace UniConfig.Editor
 
         private void DeleteSelectedColumns(ConfigTable table)
         {
+            if (table != null && table.misc)
+                return;
             if (_columnsToDelete.Count == 0)
             {
                 EditorUtility.DisplayDialog(UniConfigLoc.T("delete_col.title"),
@@ -1283,6 +1307,12 @@ namespace UniConfig.Editor
                         Rect fieldRect = Inset(cell, 1);
                         bool formulaLocked = ConstraintEvaluator.IsFormulaField(table, field.name);
                         bool autoRowId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
+                        if (table.misc && DrawMiscSpecialCell(fieldRect, table, row, field, item))
+                        {
+                            x += ColWidth;
+                            continue;
+                        }
+
                         if (formulaLocked || autoRowId)
                         {
                             // 公式字段、自动行号只读
@@ -1508,9 +1538,10 @@ namespace UniConfig.Editor
                 Rect nameRect = new(x, y, ColWidth, HeaderRowHeight);
                 DrawCellBackground(nameRect, HeaderBg, true);
                 bool lockAutoId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
+                bool lockName = lockAutoId || table.misc;
                 EditorGUI.BeginChangeCheck();
                 string newName;
-                if (lockAutoId)
+                if (lockName)
                 {
                     EditorGUI.BeginDisabledGroup(true);
                     newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
@@ -1522,7 +1553,7 @@ namespace UniConfig.Editor
                 }
 
                 bool nameChanged = EditorGUI.EndChangeCheck();
-                if (!lockAutoId && nameChanged)
+                if (!lockName && nameChanged)
                     if (newName != field.name && FieldUtils.IsValidIdentifier(newName) &&
                         table.GetFieldIndex(newName) < 0)
                     {
@@ -1550,7 +1581,7 @@ namespace UniConfig.Editor
                 Rect typeRect = new(x, y, ColWidth, RowHeight);
                 DrawCellBackground(typeRect, HeaderBg, true);
                 Rect typeButtonRect = Inset(typeRect, 1);
-                if (UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
+                if (table.misc || UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
                 {
                     EditorGUI.BeginDisabledGroup(true);
                     EditorGUI.DropdownButton(typeButtonRect,
@@ -1623,7 +1654,7 @@ namespace UniConfig.Editor
             Rect leftRect = new(startX, startY, btnW, btnH);
             Rect rightRect = new(startX + btnW, startY, btnW, btnH);
 
-            using (new EditorGUI.DisabledScope(fieldIndex <= 0))
+            using (new EditorGUI.DisabledScope(table.misc || fieldIndex <= 0))
             {
                 if (GUI.Button(leftRect, new GUIContent("<", UniConfigLoc.T("move_left")), EditorStyles.miniButtonLeft))
                 {
@@ -1633,7 +1664,7 @@ namespace UniConfig.Editor
                 }
             }
 
-            using (new EditorGUI.DisabledScope(fieldIndex >= table.fields.Count - 1))
+            using (new EditorGUI.DisabledScope(table.misc || fieldIndex >= table.fields.Count - 1))
             {
                 if (GUI.Button(rightRect, new GUIContent(">", UniConfigLoc.T("move_right")),
                         EditorStyles.miniButtonRight))
@@ -2266,6 +2297,63 @@ namespace UniConfig.Editor
                     item.SetValue(field.name, FieldUtils.GetDefaultCellString(field));
         }
 
+        /// <summary>
+        /// 杂项表的 type / value 格。name 列返回 false，走普通文本框。
+        /// </summary>
+        private bool DrawMiscSpecialCell(Rect fieldRect, ConfigTable table, int row, ConfigField field, ConfigItem item)
+        {
+            if (field.name == MiscTableSchema.TypeField)
+            {
+                string raw = item.GetValue(MiscTableSchema.TypeField);
+                string label = MiscTableSchema.TryParseType(raw, out ConfigField parsed)
+                    ? FieldUtils.GetTypeButtonLabel(parsed)
+                    : string.IsNullOrEmpty(raw)
+                        ? SupportableFieldType.Int32.ToString()
+                        : raw;
+                if (EditorGUI.DropdownButton(fieldRect, new GUIContent(label), FocusType.Keyboard))
+                {
+                    ConfigField temp = parsed ??
+                                       new ConfigField(MiscTableSchema.ValueField, SupportableFieldType.Int32);
+                    ConfigItem captured = item;
+                    FieldUtils.ShowTypeDropdownMenu(fieldRect, temp, () =>
+                    {
+                        captured.SetValue(MiscTableSchema.TypeField, MiscTableSchema.FormatType(temp));
+                        captured.SetValue(MiscTableSchema.ValueField, FieldUtils.GetDefaultCellString(temp));
+                        _dirty = true;
+                        Repaint();
+                    });
+                }
+
+                return true;
+            }
+
+            if (field.name != MiscTableSchema.ValueField)
+                return false;
+
+            if (!MiscTableSchema.TryParseType(item.GetValue(MiscTableSchema.TypeField), out ConfigField valueField))
+            {
+                EditorGUI.HelpBox(fieldRect, UniConfigLoc.T("misc_type_invalid"), MessageType.Error);
+                return true;
+            }
+
+            valueField.name = MiscTableSchema.ValueField;
+            if (valueField.IsEnum)
+            {
+                DrawEnumCell(fieldRect, table, row, valueField, item);
+                return true;
+            }
+
+            EditorGUI.BeginChangeCheck();
+            string value = EditorGUI.TextField(fieldRect, item.GetValue(MiscTableSchema.ValueField), _cellStyle);
+            if (EditorGUI.EndChangeCheck())
+            {
+                item.SetValue(MiscTableSchema.ValueField, value);
+                _dirty = true;
+            }
+
+            return true;
+        }
+
         /// <returns>绘制成功返回 true；类型无效时已画出错误提示并返回 false。</returns>
         private bool DrawEnumCell(Rect fieldRect, ConfigTable table, int row, ConfigField field, ConfigItem item)
         {
@@ -2357,6 +2445,8 @@ namespace UniConfig.Editor
 
         private void AddField(ConfigTable table)
         {
+            if (table == null || table.misc)
+                return;
             string baseName = "field";
             string name = baseName;
             int index = 1;

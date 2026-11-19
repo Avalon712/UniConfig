@@ -53,6 +53,13 @@ namespace UniConfig.Editor
         public bool autoRowIdField;
 
         /// <summary>
+        /// 0 逐行，1 整表数组。默认逐行。
+        /// </summary>
+        public int serializeMode;
+
+        public bool UseArraySerialize => serializeMode == 1;
+
+        /// <summary>
         /// 每张表的「显示列」选择。下次打开该表时恢复。
         /// </summary>
         public List<TableVisibleColumns> visibleColumnEntries = new();

@@ -75,7 +75,8 @@ namespace UniConfig
         private sealed class Parser : DownloadHandlerScript
         {
             private readonly Dictionary<int, object> _configs = new();
-            private List<object> _currentRows;
+            private readonly List<(int tableId, byte[] payload)> _pendingMisc = new();
+            private Array _currentRows;
 
             private int _currentTableId;
             private int _payloadFilled;
@@ -88,6 +89,8 @@ namespace UniConfig
             private int _rowCount;
             private int _rowsParsed;
             private State _state = State.NeedMagic;
+            private BlobKind _blobKind = BlobKind.Rows;
+            private bool _sawHeader;
 
             public Parser(int bufferSize) : base(new byte[bufferSize])
             {
@@ -158,6 +161,7 @@ namespace UniConfig
                     if (_state != State.NeedMagic)
                         throw new InvalidDataException("配置文件在表数据未完成时结束");
 
+                    ApplyPendingMisc();
                     Finished = true;
                 }
                 catch (Exception ex)
@@ -189,6 +193,8 @@ namespace UniConfig
                 {
                     case State.NeedMagic:
                         return TryReadMagic(buffer, ref offset, end);
+                    case State.NeedHeaderSize:
+                        return TryReadHeaderSize(buffer, ref offset, end);
                     case State.NeedTableId:
                         return TryReadTableId(buffer, ref offset, end);
                     case State.NeedCount:
@@ -205,14 +211,35 @@ namespace UniConfig
             private bool TryReadMagic(byte[] buffer, ref int offset, int end)
             {
                 if (end - offset < 4) return false;
-                byte[] magic = ConfigBinaryProtocol.Magic;
-                if (buffer[offset] != magic[0] || buffer[offset + 1] != magic[1] ||
-                    buffer[offset + 2] != magic[2] || buffer[offset + 3] != magic[3])
+                if (Matches(buffer, offset, ConfigBinaryProtocol.HeaderMagic))
+                {
+                    if (_sawHeader || _configs.Count > 0 || _pendingMisc.Count > 0)
+                        throw new InvalidDataException("文件头 UCFH 只能出现在配置文件开头");
+                    offset += 4;
+                    _state = State.NeedHeaderSize;
+                    return true;
+                }
+
+                if (!Matches(buffer, offset, ConfigBinaryProtocol.Magic))
                     throw new InvalidDataException(
                         $"配置文件魔数不匹配，期望 UCFG，实际 {(char)buffer[offset]}{(char)buffer[offset + 1]}{(char)buffer[offset + 2]}{(char)buffer[offset + 3]}");
 
                 offset += 4;
                 _state = State.NeedTableId;
+                return true;
+            }
+
+            private bool TryReadHeaderSize(byte[] buffer, ref int offset, int end)
+            {
+                if (end - offset < 4) return false;
+                int maxPayload = BitConverter.ToInt32(buffer, offset);
+                offset += 4;
+                if (maxPayload < 0)
+                    throw new InvalidDataException($"最大表长度非法: {maxPayload}");
+                if (maxPayload > 0)
+                    EnsurePayloadScratch(maxPayload, true);
+                _sawHeader = true;
+                _state = State.NeedMagic;
                 return true;
             }
 
@@ -232,11 +259,22 @@ namespace UniConfig
                 if (end - offset < 4) return false;
                 _rowCount = BitConverter.ToInt32(buffer, offset);
                 offset += 4;
+                _rowsParsed = 0;
+                _payloadFilled = 0;
+                if (_rowCount == ConfigBinaryProtocol.RowCountArray ||
+                    _rowCount == ConfigBinaryProtocol.RowCountMisc)
+                {
+                    _blobKind = _rowCount == ConfigBinaryProtocol.RowCountArray ? BlobKind.Array : BlobKind.Misc;
+                    _currentRows = null;
+                    _state = State.NeedPayloadLength;
+                    return true;
+                }
+
                 if (_rowCount < 0)
                     throw new InvalidDataException($"表 Id={_currentTableId} 行数非法: {_rowCount}");
 
-                _rowsParsed = 0;
-                _currentRows = new List<object>(_rowCount);
+                _blobKind = BlobKind.Rows;
+                _currentRows = ConfigMgr.CreateTableArray(_currentTableId, _rowCount) ?? new object[_rowCount];
                 if (_rowCount == 0)
                 {
                     FinishCurrentTable();
@@ -262,6 +300,12 @@ namespace UniConfig
 
             private bool TryReadPayload(byte[] buffer, ref int offset, int end)
             {
+                if (_payloadLength == 0)
+                {
+                    ConsumePayload(ReadOnlySpan<byte>.Empty);
+                    return true;
+                }
+
                 int available = end - offset;
                 int need = _payloadLength - _payloadFilled;
                 if (need <= 0)
@@ -269,11 +313,8 @@ namespace UniConfig
 
                 if (_payloadFilled == 0 && available >= _payloadLength)
                 {
-                    IConfigTable item = ConfigBinaryProtocol.DeserializeRow(
-                        _currentTableId,
-                        new ReadOnlySpan<byte>(buffer, offset, _payloadLength));
+                    ConsumePayload(new ReadOnlySpan<byte>(buffer, offset, _payloadLength));
                     offset += _payloadLength;
-                    AddRow(item);
                     return true;
                 }
 
@@ -282,28 +323,50 @@ namespace UniConfig
 
                 if (available < need)
                 {
-                    EnsurePayloadScratch(_payloadLength);
+                    EnsurePayloadScratch(_payloadLength, false);
                     Buffer.BlockCopy(buffer, offset, _payloadScratch, _payloadFilled, available);
                     _payloadFilled += available;
                     offset += available;
                     return true;
                 }
 
-                EnsurePayloadScratch(_payloadLength);
+                EnsurePayloadScratch(_payloadLength, false);
                 Buffer.BlockCopy(buffer, offset, _payloadScratch, _payloadFilled, need);
                 offset += need;
                 _payloadFilled = _payloadLength;
-                IConfigTable assembled = ConfigBinaryProtocol.DeserializeRow(
-                    _currentTableId,
-                    new ReadOnlySpan<byte>(_payloadScratch, 0, _payloadLength));
-                AddRow(assembled);
+                ConsumePayload(new ReadOnlySpan<byte>(_payloadScratch, 0, _payloadLength));
                 return true;
             }
 
-            private void AddRow(IConfigTable item)
+            private void ConsumePayload(ReadOnlySpan<byte> payload)
             {
-                if (item != null)
-                    _currentRows.Add(item);
+                if (_blobKind == BlobKind.Array)
+                {
+                    Array array = ConfigMgr.DeserializeTableArray(_currentTableId, payload);
+                    _configs[_currentTableId] = array ?? Array.Empty<object>();
+                    ResetTable();
+                    return;
+                }
+
+                if (_blobKind == BlobKind.Misc)
+                {
+                    _pendingMisc.Add((_currentTableId, payload.ToArray()));
+                    ResetTable();
+                    return;
+                }
+
+                if (_currentRows != null && _currentRows.GetType() == typeof(object[]))
+                {
+                    object[] loose = (object[])_currentRows;
+                    IConfigTable item = ConfigBinaryProtocol.DeserializeRow(_currentTableId, payload);
+                    if (item != null)
+                        loose[_rowsParsed] = item;
+                }
+                else if (_currentRows != null)
+                {
+                    ConfigMgr.SetTableItem(_currentTableId, _currentRows, _rowsParsed, payload);
+                }
+
                 _rowsParsed++;
                 if (_rowsParsed >= _rowCount)
                     FinishCurrentTable();
@@ -313,14 +376,31 @@ namespace UniConfig
 
             private void FinishCurrentTable()
             {
-                _configs[_currentTableId] = _currentRows;
+                _configs[_currentTableId] = _currentRows ?? Array.Empty<object>();
+                ResetTable();
+            }
+
+            private void ResetTable()
+            {
                 _currentTableId = 0;
                 _currentRows = null;
                 _rowCount = 0;
                 _rowsParsed = 0;
                 _payloadLength = 0;
                 _payloadFilled = 0;
+                _blobKind = BlobKind.Rows;
                 _state = State.NeedMagic;
+            }
+
+            private void ApplyPendingMisc()
+            {
+                for (int i = 0; i < _pendingMisc.Count; i++)
+                {
+                    ReadOnlySpan<byte> payload = _pendingMisc[i].payload;
+                    ConfigMgr.ApplyMisc(_pendingMisc[i].tableId, payload);
+                }
+
+                _pendingMisc.Clear();
             }
 
             private void EnsurePendingCapacity(int capacity)
@@ -333,19 +413,35 @@ namespace UniConfig
                 _pending = next;
             }
 
-            private void EnsurePayloadScratch(int capacity)
+            private void EnsurePayloadScratch(int capacity, bool exact)
             {
+                if (capacity < 1)
+                    capacity = 1;
                 if (_payloadScratch != null && _payloadScratch.Length >= capacity) return;
-                int newSize = ConfigBinaryProtocol.NextPowerOfTwo(capacity);
+                int newSize = exact ? capacity : ConfigBinaryProtocol.NextPowerOfTwo(capacity);
                 byte[] next = new byte[newSize];
                 if (_payloadScratch != null && _payloadFilled > 0)
                     Buffer.BlockCopy(_payloadScratch, 0, next, 0, _payloadFilled);
                 _payloadScratch = next;
             }
 
+            private static bool Matches(byte[] buffer, int offset, byte[] magic)
+            {
+                return buffer[offset] == magic[0] && buffer[offset + 1] == magic[1] &&
+                       buffer[offset + 2] == magic[2] && buffer[offset + 3] == magic[3];
+            }
+
+            private enum BlobKind
+            {
+                Rows,
+                Array,
+                Misc
+            }
+
             private enum State
             {
                 NeedMagic,
+                NeedHeaderSize,
                 NeedTableId,
                 NeedCount,
                 NeedPayloadLength,

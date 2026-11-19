@@ -53,13 +53,22 @@ namespace UniConfig.Editor
             sb.AppendLine("{");
 
             List<(string className, string fullName, string tableName, int tableId)> generated = new();
+            List<(string propertyName, string className, int tableId, List<ConfigField> fields)> miscTables = new();
             HashSet<string> generatedClassNames = new(StringComparer.Ordinal);
+            HashSet<string> miscNames = new(StringComparer.Ordinal);
+            HashSet<string> miscClassNames = new(StringComparer.Ordinal);
             foreach (ConfigModule module in _modules)
             {
                 if (module?.tables == null) continue;
                 foreach (ConfigTable table in module.tables)
                 {
                     if (table == null) continue;
+                    if (table.misc)
+                    {
+                        miscTables.Add(PrepareMisc(table, miscNames, miscClassNames));
+                        continue;
+                    }
+
                     ValidateTable(table);
                     string className = GetClassName(table.tableName);
                     if (!generatedClassNames.Add(className))
@@ -73,6 +82,7 @@ namespace UniConfig.Editor
                 }
             }
 
+            AppendCfgMisc(sb, miscTables);
             AppendCfgStaticClass(sb, generated);
             sb.AppendLine("}");
 
@@ -122,6 +132,45 @@ namespace UniConfig.Editor
         public static string GetClassName(string tableName)
         {
             return "Cfg" + tableName;
+        }
+
+        public static string GetMiscClassName(string tableName)
+        {
+            return "Misc" + tableName;
+        }
+
+        public static string GetMiscTypeFullName(string rootNamespace, string tableName)
+        {
+            string ns = string.IsNullOrWhiteSpace(rootNamespace) ? "Game.Config" : rootNamespace.Trim();
+            return ns + ".CfgMisc+" + GetMiscClassName(tableName);
+        }
+
+        private (string propertyName, string className, int tableId, List<ConfigField> fields) PrepareMisc(
+            ConfigTable table, HashSet<string> miscNames, HashSet<string> miscClassNames)
+        {
+            if (!FieldUtils.IsValidIdentifier(table.tableName) ||
+                MiscTableSchema.IsForbiddenTableName(table.tableName))
+                throw new InvalidOperationException(
+                    $"杂项表名不是可用的 C# 标识符: {table.moduleName}/{table.tableName}");
+
+            if (table.tableId <= 0)
+                throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 缺少有效 tableId");
+
+            string className = GetMiscClassName(table.tableName);
+            if (!miscNames.Add(table.tableName))
+                throw new InvalidOperationException($"重复的杂项表名: {table.tableName}");
+            if (miscClassNames.Contains(table.tableName) || miscNames.Contains(className) ||
+                !miscClassNames.Add(className))
+                throw new InvalidOperationException(
+                    $"杂项表名与生成的内部类冲突: {table.moduleName}/{table.tableName}");
+
+            List<MiscTableSchema.MiscEntry> entries = MiscTableSchema.Collect(table);
+            List<ConfigField> fields = new(entries.Count);
+            for (int i = 0; i < entries.Count; i++)
+                fields.Add(entries[i].Field);
+
+            table.mapCsharpTypeFullName = GetMiscTypeFullName(_rootNamespace, table.tableName);
+            return (table.tableName, className, table.tableId, fields);
         }
 
         private static void ValidateTable(ConfigTable table)
@@ -190,18 +239,28 @@ namespace UniConfig.Editor
             sb.AppendLine();
             sb.AppendLine("        public override string ToString()");
             sb.AppendLine("        {");
-            sb.Append("            return nameof(").Append(className).Append(") + \" { \"");
-            for (int i = 0; i < table.fields.Count; i++)
+            AppendInterpolatedToString(sb, "            ", className, table.fields);
+            sb.AppendLine("        }");
+        }
+
+        /// <summary>
+        /// 类型@哈希{属性=属性值, ...}
+        /// </summary>
+        private static void AppendInterpolatedToString(StringBuilder sb, string indent, string className,
+            IReadOnlyList<ConfigField> fields)
+        {
+            sb.Append(indent).Append("return $\"{nameof(").Append(className).Append(")}@{GetHashCode()}{{");
+            if (fields != null)
             {
-                ConfigField field = table.fields[i];
-                if (i > 0)
-                    sb.Append(" + \", \"");
-                sb.Append(" + \"").Append(field.name).Append(" = \" + ");
-                sb.Append(FormatFieldExpression(field));
+                for (int i = 0; i < fields.Count; i++)
+                {
+                    if (i > 0)
+                        sb.Append(", ");
+                    sb.Append(fields[i].name).Append("={").Append(FormatFieldExpression(fields[i])).Append('}');
+                }
             }
 
-            sb.AppendLine(" + \" }\";");
-            sb.AppendLine("        }");
+            sb.AppendLine("}}\";");
         }
 
         private static string FormatFieldExpression(ConfigField field)
@@ -256,11 +315,16 @@ namespace UniConfig.Editor
             sb.AppendLine("        {");
             sb.AppendLine("            ConfigMgr.RegisterDeserializeMethod(Deserialize);");
             sb.AppendLine("            ConfigMgr.RegisterGetTableIdMethod(GetTableId);");
+            sb.AppendLine("            ConfigMgr.RegisterCreateTableArray(CreateTableArray);");
+            sb.AppendLine("            ConfigMgr.RegisterSetTableItem(SetTableItem);");
+            sb.AppendLine("            ConfigMgr.RegisterDeserializeTableArray(DeserializeTableArray);");
+            sb.AppendLine("            ConfigMgr.RegisterApplyMisc(CfgMisc.Apply);");
             sb.AppendLine("        }");
             sb.AppendLine();
 
             AppendGetTableIdMethods(sb, tables);
             AppendDeserializeMethod(sb, tables);
+            AppendArrayLoadMethods(sb, tables);
             AppendToStringHelpers(sb);
 
             sb.AppendLine("    }");
@@ -346,6 +410,153 @@ namespace UniConfig.Editor
                 sb.AppendLine("            }");
             }
 
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        private static void AppendCfgMisc(
+            StringBuilder sb,
+            List<(string propertyName, string className, int tableId, List<ConfigField> fields)> miscTables)
+        {
+            sb.AppendLine("    // MemoryPack 1.21 会再生成一份不带 static 的 partial class，因此这里用密封类。");
+            sb.AppendLine("    public sealed partial class CfgMisc");
+            sb.AppendLine("    {");
+            sb.AppendLine("        private CfgMisc() {}");
+            sb.AppendLine();
+            foreach ((string propertyName, string className, _, _) in miscTables)
+            {
+                sb.Append("        public static ").Append(className).Append(' ').Append(propertyName)
+                    .AppendLine(" { get; private set; }");
+            }
+
+            if (miscTables.Count > 0)
+                sb.AppendLine();
+
+            foreach ((_, string className, _, List<ConfigField> fields) in miscTables)
+                AppendMiscClass(sb, className, fields);
+
+            sb.AppendLine("        internal static bool Apply(int tableId, in ReadOnlySpan<byte> data)");
+            sb.AppendLine("        {");
+            if (miscTables.Count == 0)
+            {
+                sb.AppendLine("            if (tableId == 0 || data.Length < 0) return false;");
+                sb.AppendLine("            return false;");
+            }
+            else
+            {
+                sb.AppendLine("            switch (tableId)");
+                sb.AppendLine("            {");
+                foreach ((string propertyName, string className, int tableId, _) in miscTables)
+                {
+                    sb.Append("                case ").Append(tableId).AppendLine(":");
+                    sb.Append("                    ").Append(propertyName).Append(" = MemoryPackSerializer.Deserialize<")
+                        .Append(className).AppendLine(">(data);");
+                    sb.AppendLine("                    return true;");
+                }
+
+                sb.AppendLine("                default:");
+                sb.AppendLine("                    return false;");
+                sb.AppendLine("            }");
+            }
+
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+        }
+
+        private static void AppendMiscClass(StringBuilder sb, string className, List<ConfigField> fields)
+        {
+            const string typeIndent = "        ";
+            const string member = "            ";
+            const string body = "                ";
+            sb.Append(typeIndent).AppendLine("[MemoryPackable]");
+            sb.Append(typeIndent).Append("public sealed partial class ").Append(className).AppendLine();
+            sb.Append(typeIndent).AppendLine("{");
+            for (int i = 0; i < fields.Count; i++)
+            {
+                ConfigField field = fields[i];
+                sb.Append(member).Append("public readonly ")
+                    .Append(FieldUtils.GetCsharpTypeName(field)).Append(' ').Append(field.name).AppendLine(";");
+            }
+
+            if (fields.Count > 0)
+                sb.AppendLine();
+
+            sb.Append(member).AppendLine("[MemoryPackConstructor]");
+            sb.Append(member).Append("public ").Append(className).Append('(');
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(FieldUtils.GetCsharpTypeName(fields[i])).Append(' ').Append(fields[i].name);
+            }
+
+            sb.AppendLine(")");
+            sb.Append(member).AppendLine("{");
+            for (int i = 0; i < fields.Count; i++)
+            {
+                sb.Append(body).Append("this.").Append(fields[i].name).Append(" = ").Append(fields[i].name)
+                    .AppendLine(";");
+            }
+
+            sb.Append(member).AppendLine("}");
+            sb.AppendLine();
+            sb.Append(member).AppendLine("public override string ToString()");
+            sb.Append(member).AppendLine("{");
+            AppendInterpolatedToString(sb, body, className, fields);
+            sb.Append(member).AppendLine("}");
+            sb.Append(typeIndent).AppendLine("}");
+            sb.AppendLine();
+        }
+
+        private static void AppendArrayLoadMethods(
+            StringBuilder sb,
+            List<(string className, string fullName, string tableName, int tableId)> tables)
+        {
+            sb.AppendLine("        private static Array CreateTableArray(int tableId, int length)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (tableId)");
+            sb.AppendLine("            {");
+            foreach ((string className, _, _, int tableId) in tables)
+            {
+                sb.Append("                case ").Append(tableId).Append(": return new ").Append(className)
+                    .AppendLine("[length];");
+            }
+
+            sb.AppendLine("                default: return null;");
+            sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+
+            sb.AppendLine(
+                "        private static void SetTableItem(int tableId, Array rows, int index, in ReadOnlySpan<byte> data)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (tableId)");
+            sb.AppendLine("            {");
+            foreach ((string className, _, _, int tableId) in tables)
+            {
+                sb.Append("                case ").Append(tableId).AppendLine(":");
+                sb.Append("                    ((").Append(className).Append("[])rows)[index] = MemoryPackSerializer.Deserialize<")
+                    .Append(className).AppendLine(">(data);");
+                sb.AppendLine("                    return;");
+            }
+
+            sb.AppendLine("                default: return;");
+            sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+
+            sb.AppendLine("        private static Array DeserializeTableArray(int tableId, in ReadOnlySpan<byte> data)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            switch (tableId)");
+            sb.AppendLine("            {");
+            foreach ((string className, _, _, int tableId) in tables)
+            {
+                sb.Append("                case ").Append(tableId).Append(": return MemoryPackSerializer.Deserialize<")
+                    .Append(className).AppendLine("[]>(data);");
+            }
+
+            sb.AppendLine("                default: return null;");
+            sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
         }

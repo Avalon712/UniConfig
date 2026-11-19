@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Threading;
+using MemoryPack;
 using UnityEditor;
 using UnityEngine;
 
@@ -132,11 +133,13 @@ namespace UniConfig.Editor
             ExternalConfigEditor.NotifyEditorDataChanged();
         }
 
-        public static ConfigTable CreateTable(string moduleName, string tableName)
+        public static ConfigTable CreateTable(string moduleName, string tableName, bool misc = false)
         {
             EnsureLoaded();
             ConfigModule module = RequireModule(moduleName);
             ValidateIdentifier(tableName, "表名");
+            if (misc && MiscTableSchema.IsForbiddenTableName(tableName))
+                throw new InvalidOperationException($"杂项表名不是可用的 C# 标识符: {tableName}");
 
             if (module.FindTable(tableName) != null)
                 throw new InvalidOperationException($"表已存在: {moduleName}/{tableName}");
@@ -148,10 +151,14 @@ namespace UniConfig.Editor
                 mapCsharpTypeFullName = string.Empty,
                 tableId = 0,
                 dataLoaded = true,
-                cachedRowCount = 0
+                cachedRowCount = 0,
+                misc = misc
             };
             module.tables.Add(table);
-            EnsureAutoRowId(table);
+            if (misc)
+                MiscTableSchema.EnsureColumns(table);
+            else
+                EnsureAutoRowId(table);
             SaveModule(module);
             SaveTable(table);
             return table;
@@ -184,11 +191,13 @@ namespace UniConfig.Editor
                                 ?? throw new InvalidOperationException($"表不存在: {moduleName}/{oldName}");
             if (module.FindTable(newName) != null)
                 throw new InvalidOperationException($"表已存在: {moduleName}/{newName}");
+            if (table.misc && MiscTableSchema.IsForbiddenTableName(newName))
+                throw new InvalidOperationException($"杂项表名不是可用的 C# 标识符: {newName}");
 
             ConfigRawStorage.RenameTableFiles(moduleName, oldName, newName);
             table.tableName = newName;
             if (!string.IsNullOrEmpty(table.mapCsharpTypeFullName))
-                table.mapCsharpTypeFullName = BuildTypeFullName(newName);
+                table.mapCsharpTypeFullName = BuildTypeFullName(table);
 
             if (table.dataLoaded)
                 SaveTable(table);
@@ -291,6 +300,9 @@ namespace UniConfig.Editor
             if (!table.dataLoaded)
                 throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 数据尚未加载，无法保存");
 
+            if (table.misc)
+                MiscTableSchema.EnsureColumns(table);
+
             int removed = RemoveEmptyItems(table);
             EnsureAutoRowId(table);
             ConfigRawStorage.SaveTable(table);
@@ -322,7 +334,12 @@ namespace UniConfig.Editor
             for (int i = table.items.Count - 1; i >= 0; i--)
             {
                 ConfigItem item = table.items[i];
-                if (item == null || item.IsEmpty(table.fields))
+                bool empty = table.misc
+                    ? item == null ||
+                      (string.IsNullOrWhiteSpace(item.GetValue(MiscTableSchema.NameField)) &&
+                       string.IsNullOrWhiteSpace(item.GetValue(MiscTableSchema.ValueField)))
+                    : item == null || item.IsEmpty(table.fields);
+                if (empty)
                 {
                     table.items.RemoveAt(i);
                     removed++;
@@ -397,7 +414,7 @@ namespace UniConfig.Editor
         /// <returns>字段结构或单元格是否发生变化</returns>
         public static bool EnsureAutoRowId(ConfigTable table)
         {
-            if (table == null || !UniConfigEditorSettings.instance.autoRowIdField)
+            if (table == null || table.misc || !UniConfigEditorSettings.instance.autoRowIdField)
                 return false;
 
             table.fields ??= new List<ConfigField>();
@@ -619,7 +636,7 @@ namespace UniConfig.Editor
 
                     string typeName = table.mapCsharpTypeFullName;
                     if (string.IsNullOrEmpty(typeName))
-                        typeName = BuildTypeFullName(table.tableName);
+                        typeName = BuildTypeFullName(table);
                     if (FindType(typeName) == null)
                         return true;
                 }
@@ -663,6 +680,9 @@ namespace UniConfig.Editor
         {
             if (table == null) throw new ArgumentNullException(nameof(table));
             EnsureTableDataLoaded(table);
+            if (table.misc)
+                return BuildMiscExportTableData(table);
+
             EnsureAutoRowId(table);
             if (table.fields == null || table.fields.Count == 0)
                 throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 没有字段");
@@ -702,7 +722,47 @@ namespace UniConfig.Editor
                 throw new InvalidOperationException(
                     $"表 {table.moduleName}/{table.tableName} 尚未分配 tableId，请先执行「生成 C#」。");
 
+            if (UniConfigEditorSettings.instance.UseArraySerialize)
+            {
+                Array array = Array.CreateInstance(type, objects.Count);
+                for (int i = 0; i < objects.Count; i++)
+                    array.SetValue(objects[i], i);
+                byte[] payload = MemoryPackSerializer.Serialize(type.MakeArrayType(), array);
+                return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects,
+                    payload, ExportBlobKind.Array);
+            }
+
             return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects);
+        }
+
+        private static ExportTableData BuildMiscExportTableData(ConfigTable table)
+        {
+            MiscTableSchema.EnsureColumns(table);
+            if (table.fields == null || table.fields.Count == 0)
+                throw new InvalidOperationException($"表 {table.moduleName}/{table.tableName} 没有字段");
+            if (table.tableId <= 0)
+                throw new InvalidOperationException(
+                    $"表 {table.moduleName}/{table.tableName} 尚未分配 tableId，请先执行「生成 C#」。");
+
+            List<MiscTableSchema.MiscEntry> entries = MiscTableSchema.Collect(table);
+            Type type = ResolveConfigType(table);
+            Type[] paramTypes = new Type[entries.Count];
+            object[] args = new object[entries.Count];
+            for (int i = 0; i < entries.Count; i++)
+            {
+                paramTypes[i] = GetClrType(entries[i].Field);
+                args[i] = FieldUtils.ToValue(entries[i].RawValue, entries[i].Field);
+            }
+
+            ConstructorInfo ctor = type.GetConstructor(paramTypes);
+            if (ctor == null)
+                throw new InvalidOperationException(
+                    $"类型 {type.FullName} 缺少与杂项字段匹配的构造函数，请重新生成 C#");
+
+            object obj = ctor.Invoke(args);
+            byte[] payload = MemoryPackSerializer.Serialize(type, obj);
+            return new ExportTableData(table.moduleName, table.tableName, table.tableId, type,
+                new List<object> { obj }, payload, ExportBlobKind.Misc);
         }
 
         private static void ApplyLoadedTableData(string moduleName, string tableName, ConfigTable loaded,
@@ -735,6 +795,9 @@ namespace UniConfig.Editor
                 live.items ??= new List<ConfigItem>();
                 live.items.Clear();
             }
+
+            if (live.misc)
+                MiscTableSchema.EnsureColumns(live);
 
             RemoveEmptyItems(live);
             live.cachedRowCount = live.items.Count;
@@ -806,7 +869,8 @@ namespace UniConfig.Editor
                 tableId = tableMeta.tableId,
                 cachedRowCount = tableMeta.rowCount,
                 dataLoaded = false,
-                isLoading = false
+                isLoading = false,
+                misc = tableMeta.misc
             };
 
             if (tableMeta.fields != null)
@@ -816,6 +880,9 @@ namespace UniConfig.Editor
 
             if (table.fields.Count == 0)
                 ConfigRawStorage.LoadTableHeader(moduleName, table.tableName, table);
+
+            if (table.misc)
+                MiscTableSchema.EnsureColumns(table);
 
             return table;
         }
@@ -833,17 +900,19 @@ namespace UniConfig.Editor
                 throw new InvalidOperationException($"{label}不是合法标识符: {name}");
         }
 
-        private static string BuildTypeFullName(string tableName)
+        private static string BuildTypeFullName(ConfigTable table)
         {
             string ns = UniConfigEditorSettings.instance.rootNamespace;
-            return $"{ns}.{CsharpConfigFileGenerator.GetClassName(tableName)}";
+            if (table != null && table.misc)
+                return CsharpConfigFileGenerator.GetMiscTypeFullName(ns, table.tableName);
+            return $"{ns}.{CsharpConfigFileGenerator.GetClassName(table.tableName)}";
         }
 
         private static Type ResolveConfigType(ConfigTable table)
         {
             string typeName = table.mapCsharpTypeFullName;
             if (string.IsNullOrEmpty(typeName))
-                typeName = BuildTypeFullName(table.tableName);
+                typeName = BuildTypeFullName(table);
 
             Type type = FindType(typeName);
             if (type == null)

@@ -13,6 +13,10 @@ namespace UniConfig
     {
         private static List<DeserializeCfgTableItemMethod> _methods;
         private static ResolveCfgTableIdMethod _resolveTableId;
+        private static CreateCfgTableArrayMethod _createArray;
+        private static SetCfgTableItemMethod _setItem;
+        private static DeserializeCfgTableArrayMethod _deserializeArray;
+        private static ApplyMiscCfgMethod _applyMisc;
         private static Dictionary<int, object> _configs;
 
         internal static bool TryDeserialize(int tableId, in ReadOnlySpan<byte> data, out IConfigTable item)
@@ -54,6 +58,75 @@ namespace UniConfig
         public static void RegisterGetTableIdMethod(ResolveCfgTableIdMethod method)
         {
             _resolveTableId = method ?? throw new ArgumentNullException(nameof(method));
+        }
+
+        /// <summary>
+        /// 注册逐行加载时的 new XX[length]。
+        /// </summary>
+        public static void RegisterCreateTableArray(CreateCfgTableArrayMethod method)
+        {
+            _createArray = method ?? throw new ArgumentNullException(nameof(method));
+        }
+
+        /// <summary>
+        /// 注册逐行加载时按下标填入反序列化结果。
+        /// </summary>
+        public static void RegisterSetTableItem(SetCfgTableItemMethod method)
+        {
+            _setItem = method ?? throw new ArgumentNullException(nameof(method));
+        }
+
+        /// <summary>
+        /// 注册整表数组的 MemoryPack 反序列化。
+        /// </summary>
+        public static void RegisterDeserializeTableArray(DeserializeCfgTableArrayMethod method)
+        {
+            _deserializeArray = method ?? throw new ArgumentNullException(nameof(method));
+        }
+
+        /// <summary>
+        /// 注册杂项表写入 CfgMisc。普通表全部解析完之后才会调用。
+        /// </summary>
+        public static void RegisterApplyMisc(ApplyMiscCfgMethod method)
+        {
+            _applyMisc = method ?? throw new ArgumentNullException(nameof(method));
+        }
+
+        internal static Array CreateTableArray(int tableId, int length)
+        {
+            return _createArray?.Invoke(tableId, length);
+        }
+
+        internal static void SetTableItem(int tableId, Array rows, int index, ReadOnlySpan<byte> data)
+        {
+            if (_setItem == null)
+            {
+                Debug.LogError(
+                    $"配置填入数组失败: tableId={tableId}。请确认已生成 C#，且 BeforeSceneLoad 已完成注册。");
+                return;
+            }
+
+            _setItem(tableId, rows, index, data);
+        }
+
+        internal static Array DeserializeTableArray(int tableId, ReadOnlySpan<byte> data)
+        {
+            Array array = _deserializeArray?.Invoke(tableId, data);
+            if (array != null)
+                return array;
+
+            Debug.LogError(
+                $"整表数组反序列化失败: tableId={tableId}。请确认已生成 C#，且导出方式与当前代码一致。");
+            return null;
+        }
+
+        internal static void ApplyMisc(int tableId, ReadOnlySpan<byte> data)
+        {
+            if (_applyMisc != null && _applyMisc(tableId, data))
+                return;
+
+            Debug.LogError(
+                $"杂项表反序列化失败: tableId={tableId}。请确认已生成 C#，且 BeforeSceneLoad 已完成注册。");
         }
 
         /// <summary>
@@ -109,9 +182,20 @@ namespace UniConfig
             if (_configs == null) return;
             foreach (KeyValuePair<int, object> config in _configs)
             {
-                List<object> items = (List<object>)config.Value;
-                Debug.Log(
-                    $"Table: Id={config.Key}, Name={(items.Count > 0 ? items[0].GetType().FullName : string.Empty)}, Count={items.Count}");
+                if (config.Value is not Array items)
+                    continue;
+
+                string name = string.Empty;
+                for (int i = 0; i < items.Length; i++)
+                {
+                    object row = items.GetValue(i);
+                    if (row == null)
+                        continue;
+                    name = row.GetType().FullName;
+                    break;
+                }
+
+                Debug.Log($"Table: Id={config.Key}, Name={name}, Count={items.Length}");
             }
         }
 
@@ -123,7 +207,7 @@ namespace UniConfig
             if (_configs != null &&
                 TryResolveTableId(typeof(T), out int tableId) &&
                 _configs.TryGetValue(tableId, out object configs))
-                return new CfgTableIterator<T>((IReadOnlyList<object>)configs);
+                return IteratorOf<T>(configs);
             return new CfgTableIterator<T>(Array.Empty<object>());
         }
 
@@ -133,25 +217,34 @@ namespace UniConfig
         public static CfgTableIterator<T> GetConfigs<T>(int tableId) where T : IConfigTable
         {
             if (_configs != null && _configs.TryGetValue(tableId, out object configs))
-                return new CfgTableIterator<T>((IReadOnlyList<object>)configs);
+                return IteratorOf<T>(configs);
             return new CfgTableIterator<T>(Array.Empty<object>());
         }
 
         /// <summary>
         /// 按行号取得一条配置。这里的 Id 是表的行号，从 1 开始，与编辑器中的 # 列一致，不是表的 tableId。
         /// 开启「自动创建 id 字段」时，该行号会写入每条配置的 id 字段。
-        /// MemoryPack 保持行序，行号减 1 即列表下标，直接按下标取出并转为 <typeparamref name="T"/>。
+        /// MemoryPack 保持行序，行号减 1 即数组下标，直接按下标取出并转为 <typeparamref name="T"/>。
         /// </summary>
         public static T GetConfigById<T>(int id) where T : IConfigTable
         {
             if (id <= 0 || _configs == null || !TryResolveTableId(typeof(T), out int tableId))
                 return default;
-            if (!_configs.TryGetValue(tableId, out object value) || value is not List<object> rows)
+            if (!_configs.TryGetValue(tableId, out object value) || value is not Array rows)
                 return default;
             int index = id - 1;
-            if ((uint)index >= (uint)rows.Count)
+            if ((uint)index >= (uint)rows.Length)
                 return default;
-            return (T)rows[index];
+            return rows.GetValue(index) is T item ? item : default;
+        }
+
+        private static CfgTableIterator<T> IteratorOf<T>(object configs) where T : IConfigTable
+        {
+            if (configs is Array array)
+                return CfgTableIterator<T>.FromArray(array);
+            if (configs is IReadOnlyList<object> list)
+                return new CfgTableIterator<T>(list);
+            return new CfgTableIterator<T>(Array.Empty<object>());
         }
 
         public static T GetConfig<T>(Predicate<T> condition) where T : IConfigTable

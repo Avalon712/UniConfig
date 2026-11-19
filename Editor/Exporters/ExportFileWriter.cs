@@ -35,22 +35,43 @@ namespace UniConfig.Editor
             if (!string.IsNullOrEmpty(directory))
                 ConfigPaths.EnsureDirectory(directory);
 
+            List<ExportTableData> ordered = OrderTables(tables);
             using (FileStream stream = new(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
             using (BinaryWriter writer = new(stream, Utf8, false))
             {
-                for (int t = 0; t < tables.Count; t++)
+                if (UniConfigEditorSettings.instance.UseArraySerialize)
                 {
-                    ExportTableData table = tables[t];
-                    if (table == null) continue;
+                    int maxPayload = 0;
+                    for (int t = 0; t < ordered.Count; t++)
+                    {
+                        int size = PayloadBytes(ordered[t]);
+                        if (size > maxPayload)
+                            maxPayload = size;
+                    }
 
+                    writer.Write(ConfigBinaryProtocol.HeaderMagic);
+                    writer.Write(maxPayload);
+                }
+
+                for (int t = 0; t < ordered.Count; t++)
+                {
+                    ExportTableData table = ordered[t];
                     writer.Write(ConfigBinaryProtocol.Magic);
                     writer.Write(table.TableId);
-                    writer.Write(table.Count);
-                    for (int i = 0; i < table.Count; i++)
+                    if (table.Kind == ExportBlobKind.Array)
+                        WriteSingle(writer, table, ConfigBinaryProtocol.RowCountArray);
+                    else if (table.Kind == ExportBlobKind.Misc)
+                        WriteSingle(writer, table, ConfigBinaryProtocol.RowCountMisc);
+                    else
                     {
-                        byte[] payload = table.GetBytes(i) ?? Array.Empty<byte>();
-                        writer.Write(payload.Length);
-                        writer.Write(payload);
+                        writer.Write(table.Count);
+                        for (int i = 0; i < table.Count; i++)
+                        {
+                            byte[] payload = table.GetBytes(i) ?? Array.Empty<byte>();
+                            writer.Write(payload.Length);
+                            if (payload.Length > 0)
+                                writer.Write(payload);
+                        }
                     }
                 }
             }
@@ -59,6 +80,53 @@ namespace UniConfig.Editor
             // 在写出后立即 Force 导入会导致 Infinite Import Loop，且 Resources/StreamingAssets 均可能报错。
             // Unity 会在失焦/切回编辑器时自行发现新文件；运行时 StreamingAssets 按路径读文件，无需导入。
             Debug.Log($"[UniConfig] 导出完成: {filePath}（{tables.Count} 张表）");
+        }
+
+        private static List<ExportTableData> OrderTables(IReadOnlyList<ExportTableData> tables)
+        {
+            List<ExportTableData> ordered = new(tables.Count);
+            for (int t = 0; t < tables.Count; t++)
+            {
+                ExportTableData table = tables[t];
+                if (table != null && table.Kind != ExportBlobKind.Misc)
+                    ordered.Add(table);
+            }
+
+            for (int t = 0; t < tables.Count; t++)
+            {
+                ExportTableData table = tables[t];
+                if (table != null && table.Kind == ExportBlobKind.Misc)
+                    ordered.Add(table);
+            }
+
+            return ordered;
+        }
+
+        private static int PayloadBytes(ExportTableData table)
+        {
+            if (table.Kind == ExportBlobKind.PerRow)
+            {
+                int max = 0;
+                for (int i = 0; i < table.Count; i++)
+                {
+                    byte[] payload = table.GetBytes(i);
+                    if (payload != null && payload.Length > max)
+                        max = payload.Length;
+                }
+
+                return max;
+            }
+
+            return table.SinglePayload?.Length ?? 0;
+        }
+
+        private static void WriteSingle(BinaryWriter writer, ExportTableData table, int marker)
+        {
+            writer.Write(marker);
+            byte[] payload = table.SinglePayload ?? Array.Empty<byte>();
+            writer.Write(payload.Length);
+            if (payload.Length > 0)
+                writer.Write(payload);
         }
     }
 }

@@ -31,7 +31,8 @@ namespace UniConfig.Editor
                         tableName = table.tableName,
                         mapCsharpTypeFullName = table.mapCsharpTypeFullName ?? string.Empty,
                         tableId = table.tableId,
-                        rowCount = table.dataLoaded ? table.items?.Count ?? 0 : table.cachedRowCount
+                        rowCount = table.dataLoaded ? table.items?.Count ?? 0 : table.cachedRowCount,
+                        misc = table.misc
                     };
 
                     if (table.fields != null)
@@ -75,6 +76,7 @@ namespace UniConfig.Editor
             public string mapCsharpTypeFullName;
             public int tableId;
             public int rowCount;
+            public bool misc;
             public List<FieldMetaDto> fields = new();
         }
 

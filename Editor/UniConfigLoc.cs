@@ -59,6 +59,14 @@ namespace UniConfig.Editor
             ["new_module.tip"] = new[] { "新建模块", "Create module" },
             ["add_table"] = new[] { "加表", "Add Table" },
             ["add_table.tip"] = new[] { "在当前模块下新建表", "Create table in current module" },
+            ["add_misc_table"] = new[] { "加杂项表", "Add Misc" },
+            ["add_misc_table.tip"] = new[]
+            {
+                "新建列固定为 name / type / value 的杂项表",
+                "Create a misc table locked to name / type / value"
+            },
+            ["misc_table"] = new[] { "杂项", "Misc" },
+            ["misc_type_invalid"] = new[] { "类型无效", "Invalid type" },
             ["rename"] = new[] { "重命名", "Rename" },
             ["rename_module.tip"] = new[] { "重命名当前模块", "Rename current module" },
             ["delete"] = new[] { "删除", "Delete" },
@@ -169,6 +177,14 @@ namespace UniConfig.Editor
             {
                 "文件名固定为 configs.bytes。Resources 加载时请去掉扩展名（例如目录 Assets/Resources → 加载路径 \"configs\"）。",
                 "File name is always configs.bytes. For Resources.Load, omit the extension (e.g. Assets/Resources → load path \"configs\")."
+            },
+            ["settings.serialize_mode"] = new[] { "导出方式", "Export mode" },
+            ["settings.serialize_per_row"] = new[] { "逐行", "Per row" },
+            ["settings.serialize_array"] = new[] { "整表数组", "Whole-table array" },
+            ["settings.serialize_mode_hint"] = new[]
+            {
+                "逐行保持原来的文件格式。整表数组把每张表写成一块数组，并在文件头记录最大的一块长度，StreamingAssets 只分配一块这么大的缓冲区反复使用。杂项表始终写在普通表后面，加载时等普通表全部解析完再写入。",
+                "Per row keeps the current file format. Whole-table array writes each table as one array and stores the largest block size in the file header, so StreamingAssets allocates a single buffer of that size and reuses it. Misc tables are always written after normal tables and applied after those tables are parsed."
             },
             ["settings.editor"] = new[] { "编辑器", "Editor" },
             ["settings.auto_save_close"] = new[] { "关闭时自动保存", "Auto-save on close" },

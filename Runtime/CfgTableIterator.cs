@@ -16,25 +16,47 @@ namespace UniConfig
         IEquatable<CfgTableIterator<TRequireType>>
         where TRequireType : IConfigTable
     {
+        private readonly Array _array;
         private readonly IReadOnlyList<object> _cfgItems;
 
         public CfgTableIterator(IReadOnlyList<object> cfgItems)
         {
             _cfgItems = cfgItems ?? Array.Empty<object>();
+            _array = null;
         }
 
-        public int Count => _cfgItems.Count;
+        /// <summary>
+        /// 运行时保存的是具体数组，例如 CfgSkill[]。调用方不知道那个数组类型。
+        /// </summary>
+        public static CfgTableIterator<TRequireType> FromArray(Array items)
+        {
+            return new CfgTableIterator<TRequireType>(items, 0);
+        }
+
+        private CfgTableIterator(Array items, int unused)
+        {
+            _array = items ?? Array.Empty<object>();
+            _cfgItems = null;
+            _ = unused;
+        }
+
+        public int Count => _array != null ? _array.Length : _cfgItems.Count;
+
+        private object GetRaw(int index)
+        {
+            return _array != null ? _array.GetValue(index) : _cfgItems[index];
+        }
 
         private TRequireType GetItem(int index)
         {
-            return _cfgItems[index] is TRequireType item ? item : default;
+            return GetRaw(index) is TRequireType item ? item : default;
         }
 
         public List<TRequireType> ToList()
         {
             List<TRequireType> list = new(Count);
             for (int i = 0; i < Count; i++)
-                if (_cfgItems[i] is TRequireType item)
+                if (GetRaw(i) is TRequireType item)
                     list.Add(item);
 
             return list;
@@ -44,13 +66,13 @@ namespace UniConfig
         {
             int matched = 0;
             for (int i = 0; i < Count; i++)
-                if (_cfgItems[i] is TRequireType)
+                if (GetRaw(i) is TRequireType)
                     matched++;
 
             TRequireType[] array = new TRequireType[matched];
             int index = 0;
             for (int i = 0; i < Count; i++)
-                if (_cfgItems[i] is TRequireType item)
+                if (GetRaw(i) is TRequireType item)
                     array[index++] = item;
 
             return array;
@@ -73,7 +95,7 @@ namespace UniConfig
 
         public bool Equals(CfgTableIterator<TRequireType> other)
         {
-            return ReferenceEquals(_cfgItems, other._cfgItems);
+            return ReferenceEquals(_array, other._array) && ReferenceEquals(_cfgItems, other._cfgItems);
         }
 
         public override bool Equals(object obj)
@@ -83,7 +105,8 @@ namespace UniConfig
 
         public override int GetHashCode()
         {
-            return _cfgItems != null ? _cfgItems.GetHashCode() : 0;
+            object key = _array ?? (object)_cfgItems;
+            return key != null ? key.GetHashCode() : 0;
         }
 
         public struct Enumerator : IEnumerator<TRequireType>

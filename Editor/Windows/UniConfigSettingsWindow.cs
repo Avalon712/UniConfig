@@ -104,6 +104,15 @@ namespace UniConfig.Editor
                 UniConfigLoc.T("settings.res_dir"), settings.resourcesExportDirectory);
             settings.streamingAssetsExportDirectory = EditorGUILayout.TextField(
                 UniConfigLoc.T("settings.sa_dir"), settings.streamingAssetsExportDirectory);
+            settings.serializeMode = EditorGUILayout.Popup(
+                UniConfigLoc.T("settings.serialize_mode"),
+                settings.serializeMode == 1 ? 1 : 0,
+                new[]
+                {
+                    UniConfigLoc.T("settings.serialize_per_row"),
+                    UniConfigLoc.T("settings.serialize_array")
+                });
+            EditorGUILayout.HelpBox(UniConfigLoc.T("settings.serialize_mode_hint"), MessageType.Info);
             EditorGUILayout.HelpBox(UniConfigLoc.T("settings.export_file_hint"), MessageType.Info);
 
             EditorGUILayout.Space(8);
