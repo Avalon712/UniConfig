@@ -219,7 +219,15 @@ namespace UniConfig.Editor
             for (int i = 0; i < fields.Count; i++)
             {
                 ConfigField field = fields[i];
-                if (i > 0) sb.Append(", ");
+                if (i > 0)
+                {
+                    sb.Append(',');
+                    if (i % 5 == 0)
+                        sb.AppendLine().Append("            ");
+                    else
+                        sb.Append(' ');
+                }
+
                 sb.Append(FieldUtils.GetCsharpTypeName(field)).Append(' ').Append(field.name);
             }
 
