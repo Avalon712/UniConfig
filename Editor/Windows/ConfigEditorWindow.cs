@@ -17,6 +17,7 @@ namespace UniConfig.Editor
     {
         private const float TreePaneWidth = 280f;
         private const float ColWidth = 110f;
+        private const float MiscNameColWidthScale = 1.5f;
         private const float RemarkColMinWidth = 220f;
         private const float RemarkEdgeMargin = 5f;
         private float _miscRemarkWidth = RemarkColMinWidth;
@@ -1489,8 +1490,14 @@ namespace UniConfig.Editor
         /// </summary>
         private float ColumnWidth(ConfigTable table, ConfigField field)
         {
-            if (table != null && table.misc && field != null && field.name == MiscTableSchema.RemarkField)
-                return _miscRemarkWidth;
+            if (table != null && table.misc && field != null)
+            {
+                if (field.name == MiscTableSchema.RemarkField)
+                    return _miscRemarkWidth;
+                if (field.name == MiscTableSchema.NameField)
+                    return ColWidth * MiscNameColWidthScale;
+            }
+
             return ColWidth;
         }
 
@@ -1539,7 +1546,7 @@ namespace UniConfig.Editor
                     continue;
                 if (table.fields[fi].name == MiscTableSchema.RemarkField)
                     continue;
-                others += ColWidth;
+                others += ColumnWidth(table, table.fields[fi]);
             }
 
             float inner = _gridViewWidth - GridScrollPadX;
