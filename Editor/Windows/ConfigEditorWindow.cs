@@ -17,6 +17,7 @@ namespace UniConfig.Editor
     {
         private const float TreePaneWidth = 280f;
         private const float ColWidth = 110f;
+        private const float RemarkColWidth = 220f;
         private const float RowHeight = 20f;
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
@@ -75,6 +76,9 @@ namespace UniConfig.Editor
         private string _treeSearch = string.Empty;
         private bool _visibleColumnsInitialized;
         private bool _rangeDragActive;
+        private bool _showFieldRemarks;
+        private int _remarkFieldIndex;
+        private Vector2 _remarkListScroll;
         private double _rangeDragValue;
         private string _rangeEditKey;
         private string _rangeEditText;
@@ -330,16 +334,25 @@ namespace UniConfig.Editor
             EditorGUILayout.EndHorizontal();
         }
 
+        private static float ToolbarButtonWidth(string text, bool hasIcon)
+        {
+            float width = EditorStyles.toolbarButton.CalcSize(new GUIContent(text ?? string.Empty)).x;
+            if (hasIcon)
+                width += 18f;
+            return Mathf.Max(width + 8f, 36f);
+        }
+
         private static bool ToolbarButton(string text, string tooltip, params string[] icons)
         {
             GUIContent content = Content(text, tooltip, icons);
             // 不要对带大图图标的 GUIContent 做 CalcSize，否则会按贴图原始尺寸把按钮撑得极宽
-            float width = EditorStyles.toolbarButton.CalcSize(new GUIContent(text)).x;
-            if (content.image != null)
-                width += 18f;
-            width = Mathf.Max(width + 8f, 36f);
-            return GUILayout.Button(content, EditorStyles.toolbarButton, GUILayout.Width(width),
-                GUILayout.ExpandWidth(false));
+            return GUILayout.Button(content, EditorStyles.toolbarButton,
+                GUILayout.Width(ToolbarButtonWidth(text, content.image != null)), GUILayout.ExpandWidth(false));
+        }
+
+        private static bool ToolbarButton(Rect rect, string text, string tooltip, params string[] icons)
+        {
+            return GUI.Button(rect, Content(text, tooltip, icons), EditorStyles.toolbarButton);
         }
 
         #endregion
@@ -780,6 +793,7 @@ namespace UniConfig.Editor
             {
                 _renameSyncKey = syncKey;
                 ClearGridFocus();
+                _remarkFieldIndex = 0;
                 _dataPageIndex = 0;
                 _gridScroll = Vector2.zero;
                 ResetAsyncSearchState();
@@ -982,50 +996,98 @@ namespace UniConfig.Editor
             GUIUtility.hotControl = 0;
         }
 
-        private void DrawDataToolbar(ConfigModule module, ConfigTable table)
+        private static GUIStyle _clippedToolbarTitle;
+
+        private static GUIStyle ClippedToolbarTitle
         {
-            if (table != null && table.misc && table.dataLoaded && MiscTableSchema.EnsureColumns(table))
-                _dirty = true;
+            get
+            {
+                if (_clippedToolbarTitle == null)
+                {
+                    _clippedToolbarTitle = new GUIStyle(EditorStyles.boldLabel)
+                    {
+                        clipping = TextClipping.Clip,
+                        alignment = TextAnchor.MiddleLeft
+                    };
+                }
 
-            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            string exportClass = string.IsNullOrEmpty(table.mapCsharpTypeFullName)
-                ? UniConfigLoc.T("not_exported")
-                : table.mapCsharpTypeFullName;
-            string idText = table.tableId > 0 ? table.tableId.ToString() : "-";
-            GUILayout.Label(
-                $"{module.moduleName}/{table.tableName} (Id={idText}, {UniConfigLoc.T("export_type")}: {exportClass})",
-                EditorStyles.boldLabel, GUILayout.MinWidth(0f), GUILayout.ExpandWidth(true));
+                return _clippedToolbarTitle;
+            }
+        }
 
-            if (ToolbarButton(UniConfigLoc.T("rename"), UniConfigLoc.T("rename_table.tip"), "editicon.sml",
-                    "d_editicon.sml"))
-                BeginRenameTable(module.moduleName, table.tableName);
+        /// <summary>
+        /// 按钮按自身宽度从右往左占位，标题只用剩余宽度，避免长标题把后面的按钮挤出窗口。
+        /// </summary>
+        private void DrawTableActionBar(ConfigTable table, string title)
+        {
+            const float barHeight = 20f;
+            Rect bar = GUILayoutUtility.GetRect(0f, barHeight, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint)
+                EditorStyles.toolbar.Draw(bar, GUIContent.none, false, false, false, false);
 
-            if (ToolbarButton(UniConfigLoc.T("delete"), UniConfigLoc.T("delete_table.tip"), "TreeEditor.Trash",
-                    "d_TreeEditor.Trash"))
+            float renameW = ToolbarButtonWidth(UniConfigLoc.T("rename"), true);
+            float deleteW = ToolbarButtonWidth(UniConfigLoc.T("delete"), true);
+            float saveW = ToolbarButtonWidth(UniConfigLoc.T("save"), true);
+            float addFieldW = ToolbarButtonWidth(UniConfigLoc.T("add_field"), true);
+            float remarkW = ToolbarButtonWidth(UniConfigLoc.T("remark.open"), true);
+            float addRowW = ToolbarButtonWidth(UniConfigLoc.T("add_row"), true);
+            float constraintW = ToolbarButtonWidth(UniConfigLoc.T("constraint.open"), true);
+            float buttons = renameW + deleteW + saveW + addFieldW + addRowW + constraintW;
+            if (!table.misc)
+                buttons += remarkW;
+
+            // GetRect 会被更宽的表格内容撑开，右端落在窗口外。按钮对齐窗口可见右缘。
+            float visibleRight = position.width - 4f;
+            float usable = Mathf.Max(0f, Mathf.Min(bar.xMax, visibleRight) - bar.x);
+            float titleW = Mathf.Max(0f, usable - buttons);
+            if (titleW > 0f)
+            {
+                GUI.Label(new Rect(bar.x + 6f, bar.y, Mathf.Max(0f, titleW - 8f), bar.height),
+                    new GUIContent(title, title), ClippedToolbarTitle);
+            }
+
+            float x = bar.x + titleW;
+            if (ToolbarButton(new Rect(x, bar.y, renameW, bar.height), UniConfigLoc.T("rename"),
+                    UniConfigLoc.T("rename_table.tip"), "editicon.sml", "d_editicon.sml"))
+                BeginRenameTable(table.moduleName, table.tableName);
+            x += renameW;
+            if (ToolbarButton(new Rect(x, bar.y, deleteW, bar.height), UniConfigLoc.T("delete"),
+                    UniConfigLoc.T("delete_table.tip"), "TreeEditor.Trash", "d_TreeEditor.Trash"))
                 DeleteSelectedTable();
+            x += deleteW;
 
             using (new EditorGUI.DisabledScope(!table.dataLoaded || table.isLoading))
             {
-                if (ToolbarButton(UniConfigLoc.T("save"), UniConfigLoc.T("save_table.tip"), "SaveActive",
-                        "d_SaveActive"))
+                if (ToolbarButton(new Rect(x, bar.y, saveW, bar.height), UniConfigLoc.T("save"),
+                        UniConfigLoc.T("save_table.tip"), "SaveActive", "d_SaveActive"))
                     TryAction(() =>
                     {
                         int removed = EditorConfigMgr.SaveTable(table);
                         _dirty = false;
                         _status = removed > 0
-                            ? UniConfigLoc.F("status.saved_table_skip", module.moduleName, table.tableName, removed)
-                            : UniConfigLoc.F("status.saved_table", module.moduleName, table.tableName);
+                            ? UniConfigLoc.F("status.saved_table_skip", table.moduleName, table.tableName, removed)
+                            : UniConfigLoc.F("status.saved_table", table.moduleName, table.tableName);
                     });
+                x += saveW;
 
                 using (new EditorGUI.DisabledScope(table.misc))
                 {
-                    if (ToolbarButton(UniConfigLoc.T("add_field"), UniConfigLoc.T("add_field.tip"), "Toolbar Plus",
-                            "d_Toolbar Plus"))
+                    if (ToolbarButton(new Rect(x, bar.y, addFieldW, bar.height), UniConfigLoc.T("add_field"),
+                            UniConfigLoc.T("add_field.tip"), "Toolbar Plus", "d_Toolbar Plus"))
                         AddField(table);
                 }
 
-                if (ToolbarButton(UniConfigLoc.T("add_row"), UniConfigLoc.T("add_row.tip"), "Toolbar Plus",
-                        "d_Toolbar Plus"))
+                x += addFieldW;
+                if (!table.misc)
+                {
+                    _showFieldRemarks = GUI.Toggle(new Rect(x, bar.y, remarkW, bar.height), _showFieldRemarks,
+                        Content(UniConfigLoc.T("remark.open"), UniConfigLoc.T("remark.open.tip"), "TextAsset Icon",
+                            "d_TextAsset Icon"), EditorStyles.toolbarButton);
+                    x += remarkW;
+                }
+
+                if (ToolbarButton(new Rect(x, bar.y, addRowW, bar.height), UniConfigLoc.T("add_row"),
+                        UniConfigLoc.T("add_row.tip"), "Toolbar Plus", "d_Toolbar Plus"))
                 {
                     ConfigItem item = new();
                     foreach (ConfigField field in table.fields)
@@ -1043,15 +1105,28 @@ namespace UniConfig.Editor
                     MarkSearchDirty();
                 }
 
+                x += addRowW;
                 using (new EditorGUI.DisabledScope(table.misc))
                 {
-                    if (ToolbarButton(UniConfigLoc.T("constraint.open"), UniConfigLoc.T("constraint.open.tip"),
-                            "FilterByType", "d_FilterByType"))
+                    if (ToolbarButton(new Rect(x, bar.y, constraintW, bar.height), UniConfigLoc.T("constraint.open"),
+                            UniConfigLoc.T("constraint.open.tip"), "FilterByType", "d_FilterByType"))
                         ConstraintEditorWindow.Open(table);
                 }
             }
+        }
 
-            EditorGUILayout.EndHorizontal();
+        private void DrawDataToolbar(ConfigModule module, ConfigTable table)
+        {
+            if (table != null && table.misc && table.dataLoaded && MiscTableSchema.EnsureColumns(table))
+                _dirty = true;
+
+            string exportClass = string.IsNullOrEmpty(table.mapCsharpTypeFullName)
+                ? UniConfigLoc.T("not_exported")
+                : table.mapCsharpTypeFullName;
+            string idText = table.tableId > 0 ? table.tableId.ToString() : "-";
+            string title =
+                $"{module.moduleName}/{table.tableName} (Id={idText}, {UniConfigLoc.T("export_type")}: {exportClass})";
+            DrawTableActionBar(table, title);
 
             // 左：搜索；右：删行/删列
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -1088,8 +1163,6 @@ namespace UniConfig.Editor
             if (searchTextChanged || searchColumnsChanged)
                 MarkSearchDirty();
 
-            GUILayout.FlexibleSpace();
-
             GUILayout.Space(6);
             using (new EditorGUI.DisabledScope(table.misc))
             {
@@ -1097,6 +1170,45 @@ namespace UniConfig.Editor
                 if (ToolbarButton(UniConfigLoc.T("delete_col"), UniConfigLoc.T("delete_col.tip"), "TreeEditor.Trash",
                         "d_TreeEditor.Trash"))
                     DeleteSelectedColumns(table);
+            }
+
+            EditorGUILayout.EndHorizontal();
+            DrawFieldRemarkPanel(table);
+        }
+
+        private void DrawFieldRemarkPanel(ConfigTable table)
+        {
+            if (table == null || table.misc || !_showFieldRemarks)
+                return;
+            if (table.fields == null || table.fields.Count == 0)
+            {
+                EditorGUILayout.HelpBox(UniConfigLoc.T("no_fields"), MessageType.Info);
+                return;
+            }
+
+            _remarkFieldIndex = Mathf.Clamp(_remarkFieldIndex, 0, table.fields.Count - 1);
+            EditorGUILayout.BeginHorizontal(GUILayout.Height(148f));
+            _remarkListScroll = EditorGUILayout.BeginScrollView(_remarkListScroll, GUILayout.Width(180f));
+            for (int i = 0; i < table.fields.Count; i++)
+            {
+                bool selected = i == _remarkFieldIndex;
+                Color prev = GUI.backgroundColor;
+                if (selected)
+                    GUI.backgroundColor = new Color(0.55f, 0.75f, 1f);
+                if (GUILayout.Button(table.fields[i].name, EditorStyles.miniButton))
+                    _remarkFieldIndex = i;
+                GUI.backgroundColor = prev;
+            }
+
+            EditorGUILayout.EndScrollView();
+
+            ConfigField field = table.fields[_remarkFieldIndex];
+            EditorGUI.BeginChangeCheck();
+            string next = EditorGUILayout.TextArea(field.remark ?? string.Empty, GUILayout.ExpandHeight(true));
+            if (EditorGUI.EndChangeCheck())
+            {
+                field.remark = next ?? string.Empty;
+                _dirty = true;
             }
 
             EditorGUILayout.EndHorizontal();
@@ -1192,7 +1304,9 @@ namespace UniConfig.Editor
 
             string[] columnNames = new string[table.fields.Count];
             for (int i = 0; i < table.fields.Count; i++)
-                columnNames[i] = table.fields[i].name;
+                columnNames[i] = table.misc && table.fields[i].name == MiscTableSchema.RemarkField
+                    ? UniConfigLoc.T("remark")
+                    : table.fields[i].name;
 
             int mask = BuildColumnMask(table, selected, defaultSelectAllAsEverything);
             EditorGUI.BeginChangeCheck();
@@ -1209,7 +1323,7 @@ namespace UniConfig.Editor
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices.Count);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
 
             Rect view = GUILayoutUtility.GetRect(
@@ -1229,7 +1343,7 @@ namespace UniConfig.Editor
                 EditorGUILayout.HelpBox(UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
 
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices.Count);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             List<int> matched = _displayRowIndices ?? new List<int>();
             int pageSize = GetPageSize(table);
             int pageCount = matched.Count == 0
@@ -1301,7 +1415,8 @@ namespace UniConfig.Editor
                     foreach (int fi in visibleFieldIndices)
                     {
                         ConfigField field = table.fields[fi];
-                        Rect cell = new(x, y, ColWidth, RowHeight);
+                        float colWidth = ColumnWidth(table, field);
+                        Rect cell = new(x, y, colWidth, RowHeight);
                         bool fkError = table.IsFkCellViolation(row, field.name);
                         DrawCellBackground(cell, fkError ? FkErrorCell : rowBg, true);
                         Rect fieldRect = Inset(cell, 1);
@@ -1309,7 +1424,7 @@ namespace UniConfig.Editor
                         bool autoRowId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
                         if (table.misc && DrawMiscSpecialCell(fieldRect, table, row, field, item))
                         {
-                            x += ColWidth;
+                            x += colWidth;
                             continue;
                         }
 
@@ -1324,7 +1439,7 @@ namespace UniConfig.Editor
                         {
                             if (!DrawEnumCell(fieldRect, table, row, field, item))
                             {
-                                x += ColWidth;
+                                x += colWidth;
                                 continue;
                             }
                         }
@@ -1351,7 +1466,7 @@ namespace UniConfig.Editor
                         if (fkError)
                             DrawRectBorder(fieldRect, FkErrorBorder, 2f);
 
-                        x += ColWidth;
+                        x += colWidth;
                     }
 
                     y += RowHeight;
@@ -1364,10 +1479,27 @@ namespace UniConfig.Editor
         /// <summary>
         /// 表格可滚动内容宽度（列总和 + 右缘留白）。滚动条由 <see cref="GUI.BeginScrollView"/> 单独占用视口，不再计入内容宽。
         /// </summary>
-        private static float GetSpreadsheetContentWidth(ConfigTable table, int visibleColumnCount)
+        private static float ColumnWidth(ConfigTable table, ConfigField field)
         {
-            float prefix = IndexColumnWidth(table) + (ShowColorTag(table) ? ColorTagColWidth : 0f);
-            return prefix + visibleColumnCount * ColWidth + GridScrollPadX;
+            if (table != null && table.misc && field != null && field.name == MiscTableSchema.RemarkField)
+                return RemarkColWidth;
+            return ColWidth;
+        }
+
+        private static float GetSpreadsheetContentWidth(ConfigTable table, List<int> visibleFieldIndices)
+        {
+            float width = IndexColumnWidth(table) + (ShowColorTag(table) ? ColorTagColWidth : 0f);
+            if (visibleFieldIndices != null && table?.fields != null)
+            {
+                for (int i = 0; i < visibleFieldIndices.Count; i++)
+                {
+                    int fi = visibleFieldIndices[i];
+                    if (fi >= 0 && fi < table.fields.Count)
+                        width += ColumnWidth(table, table.fields[fi]);
+                }
+            }
+
+            return width + GridScrollPadX;
         }
 
         private static float IndexColumnWidth(ConfigTable table)
@@ -1535,13 +1667,20 @@ namespace UniConfig.Editor
             foreach (int fi in visibleFieldIndices)
             {
                 ConfigField field = table.fields[fi];
-                Rect nameRect = new(x, y, ColWidth, HeaderRowHeight);
+                float colWidth = ColumnWidth(table, field);
+                Rect nameRect = new(x, y, colWidth, HeaderRowHeight);
                 DrawCellBackground(nameRect, HeaderBg, true);
                 bool lockAutoId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
                 bool lockName = lockAutoId || table.misc;
+                bool remarkColumn = table.misc && field.name == MiscTableSchema.RemarkField;
                 EditorGUI.BeginChangeCheck();
                 string newName;
-                if (lockName)
+                if (remarkColumn)
+                {
+                    GUI.Label(Inset(nameRect, 1), UniConfigLoc.T("remark"), _headerStyle);
+                    newName = field.name;
+                }
+                else if (lockName)
                 {
                     EditorGUI.BeginDisabledGroup(true);
                     newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
@@ -1549,6 +1688,7 @@ namespace UniConfig.Editor
                 }
                 else
                 {
+                    GUI.SetNextControlName(FieldNameControl(fi));
                     newName = EditorGUI.TextField(Inset(nameRect, 1), field.name, _cellStyle);
                 }
 
@@ -1565,7 +1705,7 @@ namespace UniConfig.Editor
                         MarkSearchDirty();
                     }
 
-                x += ColWidth;
+                x += colWidth;
             }
 
             y += HeaderRowHeight;
@@ -1578,7 +1718,8 @@ namespace UniConfig.Editor
             foreach (int fi in visibleFieldIndices)
             {
                 ConfigField field = table.fields[fi];
-                Rect typeRect = new(x, y, ColWidth, RowHeight);
+                float colWidth = ColumnWidth(table, field);
+                Rect typeRect = new(x, y, colWidth, RowHeight);
                 DrawCellBackground(typeRect, HeaderBg, true);
                 Rect typeButtonRect = Inset(typeRect, 1);
                 if (table.misc || UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
@@ -1587,7 +1728,7 @@ namespace UniConfig.Editor
                     EditorGUI.DropdownButton(typeButtonRect,
                         new GUIContent(FieldUtils.GetTypeButtonLabel(field)), FocusType.Passive);
                     EditorGUI.EndDisabledGroup();
-                    x += ColWidth;
+                    x += colWidth;
                     continue;
                 }
 
@@ -1612,7 +1753,7 @@ namespace UniConfig.Editor
                     });
                 }
 
-                x += ColWidth;
+                x += colWidth;
             }
 
             y += RowHeight;
@@ -1624,7 +1765,8 @@ namespace UniConfig.Editor
             x += opsPrefix;
             foreach (int fi in visibleFieldIndices)
             {
-                Rect op = new(x, y, ColWidth, OpsRowHeight);
+                float colWidth = ColumnWidth(table, table.fields[fi]);
+                Rect op = new(x, y, colWidth, OpsRowHeight);
                 DrawCellBackground(op, HeaderBg, true);
                 if (DrawColumnOps(op, table, fi))
                 {
@@ -1632,7 +1774,7 @@ namespace UniConfig.Editor
                     break;
                 }
 
-                x += ColWidth;
+                x += colWidth;
             }
 
             y += OpsRowHeight;
@@ -1907,10 +2049,43 @@ namespace UniConfig.Editor
         private List<int> GetVisibleFieldIndices(ConfigTable table)
         {
             List<int> list = new();
+            int remark = -1;
             for (int i = 0; i < table.fields.Count; i++)
+            {
+                if (table.misc && table.fields[i].name == MiscTableSchema.RemarkField)
+                {
+                    remark = i;
+                    continue;
+                }
+
                 if (_visibleColumns.Contains(table.fields[i].name))
                     list.Add(i);
+            }
+
+            if (remark >= 0)
+                list.Add(remark);
             return list;
+        }
+
+        private static string FieldNameControl(int fieldIndex)
+        {
+            return "UniConfigFieldName_" + fieldIndex;
+        }
+
+        private static string FocusedFieldRemark(ConfigTable table)
+        {
+            if (table == null || table.misc || table.fields == null)
+                return null;
+
+            string focused = GUI.GetNameOfFocusedControl();
+            const string prefix = "UniConfigFieldName_";
+            if (string.IsNullOrEmpty(focused) || !focused.StartsWith(prefix, StringComparison.Ordinal))
+                return null;
+            if (!int.TryParse(focused.Substring(prefix.Length), out int index))
+                return null;
+            if (index < 0 || index >= table.fields.Count)
+                return null;
+            return table.fields[index].remark ?? string.Empty;
         }
 
         private void ResetColumnSelections(ConfigTable table)
@@ -1959,6 +2134,11 @@ namespace UniConfig.Editor
             _searchColumns.RemoveWhere(name => table.GetFieldIndex(name) < 0);
             _visibleColumns.RemoveWhere(name => table.GetFieldIndex(name) < 0);
             _columnsToDelete.RemoveWhere(name => table.GetFieldIndex(name) < 0);
+            if (table.misc && table.GetFieldIndex(MiscTableSchema.RemarkField) >= 0)
+            {
+                _searchColumns.Add(MiscTableSchema.RemarkField);
+                _visibleColumns.Add(MiscTableSchema.RemarkField);
+            }
         }
 
         private void RemapColumnName(string oldName, string newName)
@@ -1977,14 +2157,27 @@ namespace UniConfig.Editor
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
             ConfigTable table = CurrentTable();
-            bool fkBad = table != null && table.dataLoaded && table.HasFkViolations;
-            string statusText = fkBad
-                ? string.IsNullOrEmpty(table.fkStatusDetail)
+            string focusedRemark = FocusedFieldRemark(table);
+            bool fkBad = focusedRemark == null && table != null && table.dataLoaded && table.HasFkViolations;
+            string statusText;
+            if (focusedRemark != null)
+            {
+                statusText = string.IsNullOrWhiteSpace(focusedRemark)
+                    ? UniConfigLoc.T("remark.none")
+                    : focusedRemark.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+            }
+            else if (fkBad)
+            {
+                statusText = string.IsNullOrEmpty(table.fkStatusDetail)
                     ? UniConfigLoc.T("constraint.fk_invalid_status")
-                    : table.fkStatusDetail
-                : string.IsNullOrEmpty(_status)
+                    : table.fkStatusDetail;
+            }
+            else
+            {
+                statusText = string.IsNullOrEmpty(_status)
                     ? UniConfigLoc.T("ready")
                     : _status;
+            }
 
             Color prev = GUI.contentColor;
             if (fkBad)

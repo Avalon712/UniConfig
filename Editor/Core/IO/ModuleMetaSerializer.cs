@@ -41,7 +41,8 @@ namespace UniConfig.Editor
                             {
                                 name = field.name,
                                 type = (int)field.type,
-                                enumTypeFullName = field.enumTypeFullName ?? string.Empty
+                                enumTypeFullName = field.enumTypeFullName ?? string.Empty,
+                                remark = field.remark ?? string.Empty
                             });
 
                     dto.tables.Add(tableDto);
@@ -86,6 +87,7 @@ namespace UniConfig.Editor
             public string name;
             public int type;
             public string enumTypeFullName;
+            public string remark;
         }
     }
 }

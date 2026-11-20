@@ -8,13 +8,14 @@ using System.Collections.Generic;
 namespace UniConfig.Editor
 {
     /// <summary>
-    /// 杂项表固定三列：name（字段名）、type（类型编码）、value（按该行类型编辑的值）。
+    /// 杂项表固定四列：name（字段名）、type（类型编码）、value（按该行类型编辑的值）、remark（备注，不生成属性）。
     /// </summary>
     internal static class MiscTableSchema
     {
         internal const string NameField = "name";
         internal const string TypeField = "type";
         internal const string ValueField = "value";
+        internal const string RemarkField = "remark";
         internal const string ApplyMethodName = "Apply";
 
         private const string EnumPrefix = "enum:";
@@ -51,24 +52,33 @@ namespace UniConfig.Editor
         }
 
         /// <summary>
-        /// 把列锁成 name / type / value。有变化时返回 true。
+        /// 把列锁成 name / type / value / remark。有变化时返回 true。
         /// </summary>
         internal static bool EnsureColumns(ConfigTable table)
         {
             if (table == null) throw new ArgumentNullException(nameof(table));
             table.fields ??= new List<ConfigField>();
 
-            bool columnsOk = table.fields.Count == 3
-                             && IsLockedStringColumn(table.fields[0], NameField)
-                             && IsLockedStringColumn(table.fields[1], TypeField)
-                             && IsLockedStringColumn(table.fields[2], ValueField);
+            bool coreOk = table.fields.Count >= 3
+                          && IsLockedStringColumn(table.fields[0], NameField)
+                          && IsLockedStringColumn(table.fields[1], TypeField)
+                          && IsLockedStringColumn(table.fields[2], ValueField);
+            bool remarkOk = table.fields.Count == 4 && IsLockedStringColumn(table.fields[3], RemarkField);
             bool changed = false;
-            if (!columnsOk)
+            if (!coreOk)
             {
                 table.fields.Clear();
                 table.fields.Add(new ConfigField(NameField, SupportableFieldType.String));
                 table.fields.Add(new ConfigField(TypeField, SupportableFieldType.String));
                 table.fields.Add(new ConfigField(ValueField, SupportableFieldType.String));
+                table.fields.Add(new ConfigField(RemarkField, SupportableFieldType.String));
+                changed = true;
+            }
+            else if (!remarkOk)
+            {
+                if (table.fields.Count > 3)
+                    table.fields.RemoveRange(3, table.fields.Count - 3);
+                table.fields.Add(new ConfigField(RemarkField, SupportableFieldType.String));
                 changed = true;
             }
 
@@ -165,7 +175,7 @@ namespace UniConfig.Editor
                     throw new InvalidOperationException(
                         $"杂项表 {table.moduleName}/{table.tableName} 第 {row} 行类型无效");
 
-                ConfigField field = new(name, parsed.type, parsed.enumTypeFullName);
+                ConfigField field = new(name, parsed.type, parsed.enumTypeFullName, item.GetValue(RemarkField));
                 if (field.type == SupportableFieldType.Enum)
                     EnumTypeUtil.ResolveOrThrow(field.enumTypeFullName);
 

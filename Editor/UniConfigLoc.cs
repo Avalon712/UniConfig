@@ -62,9 +62,17 @@ namespace UniConfig.Editor
             ["add_misc_table"] = new[] { "加杂项表", "Add Misc" },
             ["add_misc_table.tip"] = new[]
             {
-                "新建列固定为 name / type / value 的杂项表",
-                "Create a misc table locked to name / type / value"
+                "新建列固定为 name / type / value / 备注 的杂项表",
+                "Create a misc table locked to name / type / value / remark"
             },
+            ["remark"] = new[] { "备注", "Remark" },
+            ["remark.open"] = new[] { "字段备注", "Field Notes" },
+            ["remark.open.tip"] = new[]
+            {
+                "编辑各字段备注。空文本不会导出 XML 文档注释",
+                "Edit field notes. Empty text is not exported as XML docs"
+            },
+            ["remark.none"] = new[] { "（无备注）", "(No remark)" },
             ["misc_table"] = new[] { "杂项", "Misc" },
             ["misc_type_invalid"] = new[] { "类型无效", "Invalid type" },
             ["rename"] = new[] { "重命名", "Rename" },

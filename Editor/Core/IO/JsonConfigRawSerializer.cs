@@ -80,7 +80,7 @@ namespace UniConfig.Editor
                 else if (dto.fields != null && dto.fields.Count > 0 && table.fields.Count == 0)
                     foreach (FieldDto field in dto.fields)
                         table.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type,
-                            field.enumTypeFullName));
+                            field.enumTypeFullName, field.remark));
 
                 dto.AppendItemsTo(table);
             }
@@ -114,7 +114,7 @@ namespace UniConfig.Editor
                 target.fields = new List<ConfigField>();
                 foreach (FieldDto field in dto.fields)
                     target.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type,
-                        field.enumTypeFullName));
+                        field.enumTypeFullName, field.remark));
             }
 
             if (dto.constraints != null && dto.constraints.Count > 0)
@@ -200,7 +200,8 @@ namespace UniConfig.Editor
                         {
                             name = field.name,
                             type = (int)field.type,
-                            enumTypeFullName = field.enumTypeFullName ?? string.Empty
+                            enumTypeFullName = field.enumTypeFullName ?? string.Empty,
+                            remark = field.remark ?? string.Empty
                         });
 
                 if (includeFields && table.constraints != null)
@@ -248,7 +249,7 @@ namespace UniConfig.Editor
                 if (fields != null)
                     foreach (FieldDto field in fields)
                         table.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type,
-                            field.enumTypeFullName));
+                            field.enumTypeFullName, field.remark));
 
                 if (constraints != null)
                     foreach (ConstraintDto c in constraints)
@@ -277,6 +278,7 @@ namespace UniConfig.Editor
             public string name;
             public int type;
             public string enumTypeFullName;
+            public string remark;
         }
 
         [Serializable]

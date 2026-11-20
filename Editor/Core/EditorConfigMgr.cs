@@ -876,7 +876,7 @@ namespace UniConfig.Editor
             if (tableMeta.fields != null)
                 foreach (ModuleMetaSerializer.FieldMetaDto field in tableMeta.fields)
                     table.fields.Add(new ConfigField(field.name, (SupportableFieldType)field.type,
-                        field.enumTypeFullName));
+                        field.enumTypeFullName, field.remark));
 
             if (table.fields.Count == 0)
                 ConfigRawStorage.LoadTableHeader(moduleName, table.tableName, table);

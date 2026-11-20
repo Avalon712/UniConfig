@@ -208,11 +208,14 @@ namespace UniConfig.Editor
             sb.AppendLine("    {");
 
             foreach (ConfigField field in table.fields)
+            {
+                AppendXmlSummary(sb, "        ", field.remark);
                 sb.Append("        public readonly ")
                     .Append(FieldUtils.GetCsharpTypeName(field))
                     .Append(' ')
                     .Append(field.name)
                     .AppendLine(";");
+            }
 
             sb.AppendLine();
             sb.Append("        public ").Append(className).Append('(');
@@ -261,6 +264,28 @@ namespace UniConfig.Editor
             }
 
             sb.AppendLine("}}\";");
+        }
+
+        /// <summary>
+        /// 空文本不写文档注释。
+        /// </summary>
+        private static void AppendXmlSummary(StringBuilder sb, string indent, string remark)
+        {
+            if (string.IsNullOrWhiteSpace(remark))
+                return;
+
+            sb.Append(indent).AppendLine("/// <summary>");
+            string[] lines = remark.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+                sb.Append(indent).Append("/// ").AppendLine(EscapeXmlDoc(lines[i]));
+            sb.Append(indent).AppendLine("/// </summary>");
+        }
+
+        private static string EscapeXmlDoc(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
+            return text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
         }
 
         private static string FormatFieldExpression(ConfigField field)
@@ -475,6 +500,7 @@ namespace UniConfig.Editor
             for (int i = 0; i < fields.Count; i++)
             {
                 ConfigField field = fields[i];
+                AppendXmlSummary(sb, member, field.remark);
                 sb.Append(member).Append("public readonly ")
                     .Append(FieldUtils.GetCsharpTypeName(field)).Append(' ').Append(field.name).AppendLine(";");
             }
