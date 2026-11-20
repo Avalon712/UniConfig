@@ -722,17 +722,7 @@ namespace UniConfig.Editor
                 throw new InvalidOperationException(
                     $"表 {table.moduleName}/{table.tableName} 尚未分配 tableId，请先执行「生成 C#」。");
 
-            if (UniConfigEditorSettings.instance.UseArraySerialize)
-            {
-                Array array = Array.CreateInstance(type, objects.Count);
-                for (int i = 0; i < objects.Count; i++)
-                    array.SetValue(objects[i], i);
-                byte[] payload = MemoryPackSerializer.Serialize(type.MakeArrayType(), array);
-                return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects,
-                    payload, ExportBlobKind.Array);
-            }
-
-            return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects);
+            return PackExport(table, type, objects);
         }
 
         private static ExportTableData BuildMiscExportTableData(ConfigTable table)
@@ -760,9 +750,25 @@ namespace UniConfig.Editor
                     $"类型 {type.FullName} 缺少与杂项字段匹配的构造函数，请重新生成 C#");
 
             object obj = ctor.Invoke(args);
-            byte[] payload = MemoryPackSerializer.Serialize(type, obj);
-            return new ExportTableData(table.moduleName, table.tableName, table.tableId, type,
-                new List<object> { obj }, payload, ExportBlobKind.Misc);
+            return PackExport(table, type, new List<object> { obj });
+        }
+
+        /// <summary>
+        /// 普通表和杂项表共用。整表数组时杂项表的数组长度是 1。
+        /// </summary>
+        private static ExportTableData PackExport(ConfigTable table, Type type, List<object> objects)
+        {
+            if (UniConfigEditorSettings.instance.UseArraySerialize)
+            {
+                Array array = Array.CreateInstance(type, objects.Count);
+                for (int i = 0; i < objects.Count; i++)
+                    array.SetValue(objects[i], i);
+                byte[] payload = MemoryPackSerializer.Serialize(type.MakeArrayType(), array);
+                return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects,
+                    payload, ExportBlobKind.Array);
+            }
+
+            return new ExportTableData(table.moduleName, table.tableName, table.tableId, type, objects);
         }
 
         private static void ApplyLoadedTableData(string moduleName, string tableName, ConfigTable loaded,

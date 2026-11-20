@@ -191,8 +191,8 @@ namespace UniConfig.Editor
             ["settings.serialize_array"] = new[] { "整表数组", "Whole-table array" },
             ["settings.serialize_mode_hint"] = new[]
             {
-                "逐行保持原来的文件格式。整表数组把每张表写成一块数组，并在文件头记录最大的一块长度，StreamingAssets 只分配一块这么大的缓冲区反复使用。杂项表始终写在普通表后面，加载时等普通表全部解析完再写入。",
-                "Per row keeps the current file format. Whole-table array writes each table as one array and stores the largest block size in the file header, so StreamingAssets allocates a single buffer of that size and reuses it. Misc tables are always written after normal tables and applied after those tables are parsed."
+                "逐行保持原来的文件格式。整表数组把每张表写成一块数组，并在文件头记录最大的一块长度，StreamingAssets 只分配一块这么大的缓冲区反复使用。杂项表同样按这套格式导出，数组里只有一个对象。",
+                "Per row keeps the current file format. Whole-table array writes each table as one array and stores the largest block size in the file header, so StreamingAssets allocates a single buffer of that size and reuses it. Misc tables use the same format, and the array contains a single object."
             },
             ["settings.editor"] = new[] { "编辑器", "Editor" },
             ["settings.auto_save_close"] = new[] { "关闭时自动保存", "Auto-save on close" },

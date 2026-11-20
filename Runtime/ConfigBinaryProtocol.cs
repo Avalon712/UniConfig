@@ -14,8 +14,7 @@ namespace UniConfig
     /// 整表数组文件以 UCFH + int32 最大块长度开头；逐行文件没有这个头。
     /// 每张表：魔数 UCFG(4) + 表唯一 Id(int32) + 行数(int32) + 数据。
     /// 行数 ≥ 0：N × (payloadLen + 单行 MemoryPack)，读入 new XX[length]。
-    /// 行数 = -1：一块 T[] 的 MemoryPack。
-    /// 行数 = -2：一块杂项对象的 MemoryPack，全部普通表解析完后再写入 CfgMisc。
+    /// 行数 = -1：一块 T[] 的 MemoryPack。杂项表和普通表相同，整表数组时长度是 1。
     /// </summary>
     public static class ConfigBinaryProtocol
     {
@@ -26,9 +25,6 @@ namespace UniConfig
         /// <summary>整表数组。后面只有一块 T[] 的 MemoryPack。</summary>
         public const int RowCountArray = -1;
 
-        /// <summary>杂项表。后面只有一块单个对象的 MemoryPack。</summary>
-        public const int RowCountMisc = -2;
-
         public static Dictionary<int, object> ReadAll(byte[] data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
@@ -37,7 +33,6 @@ namespace UniConfig
 
             int offset = 0;
             int end = data.Length;
-            List<(int tableId, byte[] payload)> misc = new();
 
             if (end >= 4 && HasMagic(data, 0, HeaderMagic))
             {
@@ -71,19 +66,11 @@ namespace UniConfig
                     throw new InvalidDataException($"表 Id={tableId} 行数处截断");
 
                 int rowCount = ReadInt32LittleEndian(data, ref offset);
-                if (rowCount == RowCountArray || rowCount == RowCountMisc)
+                if (rowCount == RowCountArray)
                 {
                     ReadOnlySpan<byte> payload = ReadPayload(data, ref offset, end, tableId, "数据块");
-                    if (rowCount == RowCountArray)
-                    {
-                        Array array = ConfigMgr.DeserializeTableArray(tableId, payload);
-                        result[tableId] = array ?? Array.Empty<object>();
-                    }
-                    else
-                    {
-                        misc.Add((tableId, payload.ToArray()));
-                    }
-
+                    Array array = ConfigMgr.DeserializeTableArray(tableId, payload);
+                    result[tableId] = array ?? Array.Empty<object>();
                     continue;
                 }
 
@@ -108,12 +95,6 @@ namespace UniConfig
                 }
 
                 result[tableId] = rows;
-            }
-
-            for (int i = 0; i < misc.Count; i++)
-            {
-                ReadOnlySpan<byte> payload = misc[i].payload;
-                ConfigMgr.ApplyMisc(misc[i].tableId, payload);
             }
 
             return result;

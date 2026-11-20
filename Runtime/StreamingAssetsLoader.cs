@@ -75,7 +75,6 @@ namespace UniConfig
         private sealed class Parser : DownloadHandlerScript
         {
             private readonly Dictionary<int, object> _configs = new();
-            private readonly List<(int tableId, byte[] payload)> _pendingMisc = new();
             private Array _currentRows;
 
             private int _currentTableId;
@@ -161,7 +160,6 @@ namespace UniConfig
                     if (_state != State.NeedMagic)
                         throw new InvalidDataException("配置文件在表数据未完成时结束");
 
-                    ApplyPendingMisc();
                     Finished = true;
                 }
                 catch (Exception ex)
@@ -213,7 +211,7 @@ namespace UniConfig
                 if (end - offset < 4) return false;
                 if (Matches(buffer, offset, ConfigBinaryProtocol.HeaderMagic))
                 {
-                    if (_sawHeader || _configs.Count > 0 || _pendingMisc.Count > 0)
+                    if (_sawHeader || _configs.Count > 0)
                         throw new InvalidDataException("文件头 UCFH 只能出现在配置文件开头");
                     offset += 4;
                     _state = State.NeedHeaderSize;
@@ -261,10 +259,9 @@ namespace UniConfig
                 offset += 4;
                 _rowsParsed = 0;
                 _payloadFilled = 0;
-                if (_rowCount == ConfigBinaryProtocol.RowCountArray ||
-                    _rowCount == ConfigBinaryProtocol.RowCountMisc)
+                if (_rowCount == ConfigBinaryProtocol.RowCountArray)
                 {
-                    _blobKind = _rowCount == ConfigBinaryProtocol.RowCountArray ? BlobKind.Array : BlobKind.Misc;
+                    _blobKind = BlobKind.Array;
                     _currentRows = null;
                     _state = State.NeedPayloadLength;
                     return true;
@@ -351,13 +348,6 @@ namespace UniConfig
                     return;
                 }
 
-                if (_blobKind == BlobKind.Misc)
-                {
-                    _pendingMisc.Add((_currentTableId, payload.ToArray()));
-                    ResetTable();
-                    return;
-                }
-
                 if (_currentRows != null && _currentRows.GetType() == typeof(object[]))
                 {
                     object[] loose = (object[])_currentRows;
@@ -395,17 +385,6 @@ namespace UniConfig
                 _state = State.NeedMagic;
             }
 
-            private void ApplyPendingMisc()
-            {
-                for (int i = 0; i < _pendingMisc.Count; i++)
-                {
-                    ReadOnlySpan<byte> payload = _pendingMisc[i].payload;
-                    ConfigMgr.ApplyMisc(_pendingMisc[i].tableId, payload);
-                }
-
-                _pendingMisc.Clear();
-            }
-
             private void EnsurePendingCapacity(int capacity)
             {
                 if (_pending.Length >= capacity) return;
@@ -437,8 +416,7 @@ namespace UniConfig
             private enum BlobKind
             {
                 Rows,
-                Array,
-                Misc
+                Array
             }
 
             private enum State

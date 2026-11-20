@@ -11,8 +11,7 @@ namespace UniConfig.Editor
     internal enum ExportBlobKind
     {
         PerRow = 0,
-        Array = 1,
-        Misc = 2
+        Array = 1
     }
 
     public sealed class ExportTableData
@@ -30,7 +29,7 @@ namespace UniConfig.Editor
         }
 
         /// <summary>
-        /// 整表数组或杂项表：objects 仍给编辑器缓存用，写出时只用 singlePayload。
+        /// 整表数组：objects 仍给编辑器缓存用，写出时只用 singlePayload。
         /// </summary>
         internal ExportTableData(string moduleName, string tableName, int tableId, Type csharpType,
             List<object> objects, byte[] singlePayload, ExportBlobKind kind)

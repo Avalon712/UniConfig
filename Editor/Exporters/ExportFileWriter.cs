@@ -60,8 +60,6 @@ namespace UniConfig.Editor
                     writer.Write(table.TableId);
                     if (table.Kind == ExportBlobKind.Array)
                         WriteSingle(writer, table, ConfigBinaryProtocol.RowCountArray);
-                    else if (table.Kind == ExportBlobKind.Misc)
-                        WriteSingle(writer, table, ConfigBinaryProtocol.RowCountMisc);
                     else
                     {
                         writer.Write(table.Count);
@@ -88,14 +86,7 @@ namespace UniConfig.Editor
             for (int t = 0; t < tables.Count; t++)
             {
                 ExportTableData table = tables[t];
-                if (table != null && table.Kind != ExportBlobKind.Misc)
-                    ordered.Add(table);
-            }
-
-            for (int t = 0; t < tables.Count; t++)
-            {
-                ExportTableData table = tables[t];
-                if (table != null && table.Kind == ExportBlobKind.Misc)
+                if (table != null)
                     ordered.Add(table);
             }
 

@@ -16,7 +16,6 @@ namespace UniConfig
         private static CreateCfgTableArrayMethod _createArray;
         private static SetCfgTableItemMethod _setItem;
         private static DeserializeCfgTableArrayMethod _deserializeArray;
-        private static ApplyMiscCfgMethod _applyMisc;
         private static Dictionary<int, object> _configs;
 
         internal static bool TryDeserialize(int tableId, in ReadOnlySpan<byte> data, out IConfigTable item)
@@ -84,14 +83,6 @@ namespace UniConfig
             _deserializeArray = method ?? throw new ArgumentNullException(nameof(method));
         }
 
-        /// <summary>
-        /// 注册杂项表写入 CfgMisc。普通表全部解析完之后才会调用。
-        /// </summary>
-        public static void RegisterApplyMisc(ApplyMiscCfgMethod method)
-        {
-            _applyMisc = method ?? throw new ArgumentNullException(nameof(method));
-        }
-
         internal static Array CreateTableArray(int tableId, int length)
         {
             return _createArray?.Invoke(tableId, length);
@@ -118,15 +109,6 @@ namespace UniConfig
             Debug.LogError(
                 $"整表数组反序列化失败: tableId={tableId}。请确认已生成 C#，且导出方式与当前代码一致。");
             return null;
-        }
-
-        internal static void ApplyMisc(int tableId, ReadOnlySpan<byte> data)
-        {
-            if (_applyMisc != null && _applyMisc(tableId, data))
-                return;
-
-            Debug.LogError(
-                $"杂项表反序列化失败: tableId={tableId}。请确认已生成 C#，且 BeforeSceneLoad 已完成注册。");
         }
 
         /// <summary>
@@ -236,6 +218,19 @@ namespace UniConfig
             if ((uint)index >= (uint)rows.Length)
                 return default;
             return rows.GetValue(index) is T item ? item : default;
+        }
+
+        /// <summary>
+        /// 取得杂项表的那一个配置对象。杂项表和普通表一样放在配置字典里，整表数组导出时这个数组只有一个元素。
+        /// <see cref="GetConfigs{T}()"/>、<see cref="GetConfigById{T}"/> 同样适用。
+        /// </summary>
+        public static T GetMiscConfig<T>() where T : IConfigTable
+        {
+            if (_configs == null || !TryResolveTableId(typeof(T), out int tableId))
+                return default;
+            if (!_configs.TryGetValue(tableId, out object value) || value is not Array rows || rows.Length == 0)
+                return default;
+            return rows.GetValue(0) is T item ? item : default;
         }
 
         private static CfgTableIterator<T> IteratorOf<T>(object configs) where T : IConfigTable

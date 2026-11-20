@@ -16,7 +16,6 @@ namespace UniConfig.Editor
         internal const string TypeField = "type";
         internal const string ValueField = "value";
         internal const string RemarkField = "remark";
-        internal const string ApplyMethodName = "Apply";
 
         private const string EnumPrefix = "enum:";
 
@@ -46,9 +45,7 @@ namespace UniConfig.Editor
 
         internal static bool IsForbiddenTableName(string name)
         {
-            return IsReservedWord(name) ||
-                   name == ApplyMethodName ||
-                   name == "CfgMisc";
+            return IsReservedWord(name);
         }
 
         /// <summary>

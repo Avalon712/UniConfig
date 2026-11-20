@@ -33,9 +33,4 @@ namespace UniConfig
     /// 把一整块 MemoryPack 直接反序列化成具体类型的数组。未知表返回 null。
     /// </summary>
     public delegate Array DeserializeCfgTableArrayMethod(int tableId, in ReadOnlySpan<byte> data);
-
-    /// <summary>
-    /// 把杂项表的单个对象写入 CfgMisc。处理了该 tableId 时返回 true。
-    /// </summary>
-    public delegate bool ApplyMiscCfgMethod(int tableId, in ReadOnlySpan<byte> data);
 }

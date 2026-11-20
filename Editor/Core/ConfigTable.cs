@@ -31,7 +31,7 @@ namespace UniConfig.Editor
         public string tableName;
 
         /// <summary>
-        /// 杂项表。列固定为 name / type / value，生成到 CfgMisc 的内部类，不进入 ConfigMgr。
+        /// 杂项表。列固定为 name / type / value / remark，每一行生成成 CfgMisc 前缀类上的一个字段。
         /// </summary>
         public bool misc;
 
