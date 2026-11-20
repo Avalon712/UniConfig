@@ -17,7 +17,10 @@ namespace UniConfig.Editor
     {
         private const float TreePaneWidth = 280f;
         private const float ColWidth = 110f;
-        private const float RemarkColWidth = 220f;
+        private const float RemarkColMinWidth = 220f;
+        private const float RemarkEdgeMargin = 5f;
+        private float _miscRemarkWidth = RemarkColMinWidth;
+        private float _gridViewWidth;
         private const float RowHeight = 20f;
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
@@ -1323,13 +1326,15 @@ namespace UniConfig.Editor
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
 
-            Rect view = GUILayoutUtility.GetRect(
+            Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
                 0f, gridHeight + 8f,
                 GUILayout.ExpandWidth(true),
-                GUILayout.Height(gridHeight + 8f));
+                GUILayout.Height(gridHeight + 8f)));
+            RememberGridViewWidth(view);
+            UpdateMiscRemarkWidth(table, visibleFieldIndices, false);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, gridHeight));
             DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, 0f, 0f, out _, out _);
             GUI.EndScrollView();
@@ -1343,7 +1348,6 @@ namespace UniConfig.Editor
                 EditorGUILayout.HelpBox(UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
 
             const float OpsRowHeight = 24f;
-            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             List<int> matched = _displayRowIndices ?? new List<int>();
             int pageSize = GetPageSize(table);
             int pageCount = matched.Count == 0
@@ -1358,10 +1362,14 @@ namespace UniConfig.Editor
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + visibleRows * RowHeight + 8;
             float contentHeight = Mathf.Max(gridHeight, 200f);
 
-            Rect view = GUILayoutUtility.GetRect(
+            Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
                 0f, 0f,
                 GUILayout.ExpandWidth(true),
-                GUILayout.ExpandHeight(true));
+                GUILayout.ExpandHeight(true)));
+            RememberGridViewWidth(view);
+            bool reserveVerticalScrollbar = view.height > 1f && contentHeight > view.height;
+            UpdateMiscRemarkWidth(table, visibleFieldIndices, reserveVerticalScrollbar);
+            float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             // 显式 content 尺寸，避免 GUILayout ScrollView 在改宽/停靠 Tab 时把内容宽度压窄
             _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, contentHeight));
 
@@ -1479,14 +1487,74 @@ namespace UniConfig.Editor
         /// <summary>
         /// 表格可滚动内容宽度（列总和 + 右缘留白）。滚动条由 <see cref="GUI.BeginScrollView"/> 单独占用视口，不再计入内容宽。
         /// </summary>
-        private static float ColumnWidth(ConfigTable table, ConfigField field)
+        private float ColumnWidth(ConfigTable table, ConfigField field)
         {
             if (table != null && table.misc && field != null && field.name == MiscTableSchema.RemarkField)
-                return RemarkColWidth;
+                return _miscRemarkWidth;
             return ColWidth;
         }
 
-        private static float GetSpreadsheetContentWidth(ConfigTable table, List<int> visibleFieldIndices)
+        /// <summary>
+        /// 杂项表的布局矩形经常比窗口宽，减在内容上的留白会被裁到窗口外。
+        /// 只把杂项表视口右缘收到窗口可见边内侧，其它表保持原宽度。
+        /// </summary>
+        private Rect ClampGridView(ConfigTable table, Rect view)
+        {
+            if (table == null || !table.misc || view.width <= 1f)
+                return view;
+
+            float visibleRight = position.width;
+            float viewWidth = EditorGUIUtility.currentViewWidth;
+            if (viewWidth > 1f)
+                visibleRight = Mathf.Min(visibleRight, viewWidth);
+
+            float right = visibleRight - RemarkEdgeMargin;
+            if (view.xMax > right)
+                view.xMax = Mathf.Max(view.x, right);
+            return view;
+        }
+
+        private void RememberGridViewWidth(Rect view)
+        {
+            if (Event.current.type == EventType.Layout || view.width <= 1f)
+                return;
+            _gridViewWidth = view.width;
+        }
+
+        /// <summary>
+        /// 杂项表备注列吃掉视口里其它列剩下的宽度。右缘留白在视口外面，由 <see cref="ClampGridView"/> 留出。
+        /// </summary>
+        private void UpdateMiscRemarkWidth(ConfigTable table, List<int> visibleFieldIndices,
+            bool reserveVerticalScrollbar)
+        {
+            _miscRemarkWidth = RemarkColMinWidth;
+            if (table == null || !table.misc || visibleFieldIndices == null || _gridViewWidth <= 1f)
+                return;
+
+            float others = IndexColumnWidth(table) + (ShowColorTag(table) ? ColorTagColWidth : 0f);
+            for (int i = 0; i < visibleFieldIndices.Count; i++)
+            {
+                int fi = visibleFieldIndices[i];
+                if (fi < 0 || fi >= table.fields.Count)
+                    continue;
+                if (table.fields[fi].name == MiscTableSchema.RemarkField)
+                    continue;
+                others += ColWidth;
+            }
+
+            float inner = _gridViewWidth - GridScrollPadX;
+            if (reserveVerticalScrollbar)
+            {
+                float scrollbar = GUI.skin.verticalScrollbar.fixedWidth;
+                if (scrollbar < 1f)
+                    scrollbar = 16f;
+                inner -= scrollbar;
+            }
+
+            _miscRemarkWidth = Mathf.Max(RemarkColMinWidth, inner - others);
+        }
+
+        private float GetSpreadsheetContentWidth(ConfigTable table, List<int> visibleFieldIndices)
         {
             float width = IndexColumnWidth(table) + (ShowColorTag(table) ? ColorTagColWidth : 0f);
             if (visibleFieldIndices != null && table?.fields != null)
