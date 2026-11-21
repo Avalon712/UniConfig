@@ -207,6 +207,21 @@ namespace UniConfig.Editor
             return (T)rows[index];
         }
 
+        /// <summary>
+        /// 取得杂项表的那一个配置对象。杂项表和普通表一样放在编辑器缓存里，列表里只有这一个对象。
+        /// <see cref="GetConfigs{T}()"/>、<see cref="GetConfigById{T}"/> 同样适用。
+        /// </summary>
+        public static T GetMiscConfig<T>() where T : IConfigTable
+        {
+            EnsureLoaded();
+            if (_configsById == null || !TryResolveTableId(typeof(T), out int tableId))
+                return default;
+            if (!_configsById.TryGetValue(tableId, out object value) || value is not List<object> rows ||
+                rows.Count == 0)
+                return default;
+            return rows[0] is T item ? item : default;
+        }
+
         public static T GetConfig<T>(Predicate<T> condition) where T : IConfigTable
         {
             if (condition == null) return default;
