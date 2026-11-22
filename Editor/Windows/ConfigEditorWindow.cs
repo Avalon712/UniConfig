@@ -234,6 +234,13 @@ namespace UniConfig.Editor
             if (TryHandleRenameHotkeys())
                 return;
 
+            // 按钮不拿键盘焦点。先清掉，后面真正点到的输入框会再拿到焦点，点在别处则结束编辑。
+            Event guiEvent = Event.current;
+            int focusedControl = GUIUtility.keyboardControl;
+            bool clearFocus = guiEvent.type == EventType.MouseDown && guiEvent.button == 0 && focusedControl != 0;
+            if (clearFocus)
+                GUIUtility.keyboardControl = 0;
+
             DrawMainToolbar();
 
             EditorGUILayout.BeginHorizontal();
@@ -244,6 +251,13 @@ namespace UniConfig.Editor
 
             DrawStatusBar();
             HandleRenameClickOutside();
+
+            // 点在输入框外时，光标要等重绘才消失。没人重新拿走焦点就立刻重画。
+            if (clearFocus && GUIUtility.keyboardControl == 0)
+            {
+                EditorGUIUtility.editingTextField = false;
+                Repaint();
+            }
         }
 
         [MenuItem("UniConfig/Config Editor")]
@@ -1193,6 +1207,7 @@ namespace UniConfig.Editor
             _remarkFieldIndex = Mathf.Clamp(_remarkFieldIndex, 0, table.fields.Count - 1);
             EditorGUILayout.BeginHorizontal(GUILayout.Height(148f));
             _remarkListScroll = EditorGUILayout.BeginScrollView(_remarkListScroll, GUILayout.Width(180f));
+            int pendingIndex = -1;
             for (int i = 0; i < table.fields.Count; i++)
             {
                 bool selected = i == _remarkFieldIndex;
@@ -1200,13 +1215,15 @@ namespace UniConfig.Editor
                 if (selected)
                     GUI.backgroundColor = new Color(0.55f, 0.75f, 1f);
                 if (GUILayout.Button(table.fields[i].name, EditorStyles.miniButton))
-                    _remarkFieldIndex = i;
+                    pendingIndex = i;
                 GUI.backgroundColor = prev;
             }
 
             EditorGUILayout.EndScrollView();
 
+            // 先把输入框画在当前字段上，焦点丢失时才能把文本写回这个字段，再切换选中项。
             ConfigField field = table.fields[_remarkFieldIndex];
+            GUI.SetNextControlName(FieldRemarkControl(_remarkFieldIndex));
             EditorGUI.BeginChangeCheck();
             string next = EditorGUILayout.TextArea(field.remark ?? string.Empty, GUILayout.ExpandHeight(true));
             if (EditorGUI.EndChangeCheck())
@@ -1215,7 +1232,20 @@ namespace UniConfig.Editor
                 _dirty = true;
             }
 
+            if (pendingIndex >= 0 && pendingIndex != _remarkFieldIndex)
+            {
+                _remarkFieldIndex = pendingIndex;
+                GUI.FocusControl(null);
+                GUIUtility.keyboardControl = 0;
+                Repaint();
+            }
+
             EditorGUILayout.EndHorizontal();
+        }
+
+        private static string FieldRemarkControl(int fieldIndex)
+        {
+            return "UniConfigFieldRemark_" + fieldIndex;
         }
 
         private void DeleteRowByIndex(ConfigTable table, int oneBasedIndex)
