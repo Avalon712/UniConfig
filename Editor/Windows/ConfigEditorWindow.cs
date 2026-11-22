@@ -26,6 +26,7 @@ namespace UniConfig.Editor
         private int _virtualRowFirst = -1;
         private int _virtualRowLast = -1;
         private float _virtualScrollY = float.NaN;
+        private float _pageNavBudget = -1f;
         private const int VirtualRowOverscan = 8;
         private const float RowHeight = 20f;
         private const float HeaderRowHeight = 18f;
@@ -58,6 +59,9 @@ namespace UniConfig.Editor
         private List<int> _displayRowIndices = new();
         private Vector2 _gridScroll;
         private GUIStyle _headerStyle;
+        private GUIStyle _colMoveLeft;
+        private GUIStyle _colMoveMid;
+        private GUIStyle _colMoveRight;
         private GUIStyle _rowDeleteStyle;
         private bool _isSearching;
         private GUIStyle _paneTitleStyle;
@@ -246,15 +250,24 @@ namespace UniConfig.Editor
             if (clearFocus)
                 GUIUtility.keyboardControl = 0;
 
+            // 工具栏、中间区域、状态栏分成三截固定高度。否则中间的弹性表格会把底栏推出窗口，分页只剩上半截。
+            float barH = ToolbarStripHeight();
+            GUILayout.BeginArea(new Rect(0f, 0f, position.width, barH));
             DrawMainToolbar();
+            GUILayout.EndArea();
 
-            EditorGUILayout.BeginHorizontal();
+            float bodyH = Mathf.Max(0f, position.height - barH - barH);
+            GUILayout.BeginArea(new Rect(0f, barH, position.width, bodyH));
+            EditorGUILayout.BeginHorizontal(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             DrawTreePane();
             DrawVerticalSplitter();
             DrawDataPane();
             EditorGUILayout.EndHorizontal();
+            GUILayout.EndArea();
 
+            GUILayout.BeginArea(new Rect(0f, position.height - barH, position.width, barH));
             DrawStatusBar();
+            GUILayout.EndArea();
             HandleRenameClickOutside();
 
             // 点在输入框外时，光标要等重绘才消失。没人重新拿走焦点就立刻重画。
@@ -373,6 +386,16 @@ namespace UniConfig.Editor
             EditorGUILayout.EndHorizontal();
         }
 
+        private static float ToolbarStripHeight()
+        {
+            float height = EditorStyles.toolbar.fixedHeight;
+            float button = EditorStyles.toolbarButton.CalcHeight(new GUIContent("Ag"), 80f);
+            height = Mathf.Max(height, button);
+            if (height < 1f)
+                height = EditorStyles.toolbar.CalcHeight(GUIContent.none, 100f);
+            return Mathf.Max(height, 21f);
+        }
+
         private static float ToolbarButtonWidth(string text, bool hasIcon)
         {
             float width = EditorStyles.toolbarButton.CalcSize(new GUIContent(text ?? string.Empty)).x;
@@ -400,7 +423,7 @@ namespace UniConfig.Editor
 
         private void DrawTreePane()
         {
-            EditorGUILayout.BeginVertical(GUILayout.Width(TreePaneWidth));
+            EditorGUILayout.BeginVertical(GUILayout.Width(TreePaneWidth), GUILayout.ExpandHeight(true));
             DrawModuleToolbar();
             DrawTreeSearchBar();
 
@@ -815,7 +838,7 @@ namespace UniConfig.Editor
         {
             // 固定为窗口剩余宽度：否则工具栏的最小宽度会把整个数据区撑出窗口，表格视口右侧被裁掉
             float paneWidth = Mathf.Max(0f, position.width - TreePaneWidth - 1f);
-            EditorGUILayout.BeginVertical(GUILayout.Width(paneWidth));
+            EditorGUILayout.BeginVertical(GUILayout.Width(paneWidth), GUILayout.ExpandHeight(true));
 
             ConfigModule module = CurrentModule();
             ConfigTable table = CurrentTable();
@@ -860,18 +883,22 @@ namespace UniConfig.Editor
             ConstraintEvaluator.EnsureForeignKeyState(table);
             DrawDataToolbar(module, table);
             TickAsyncSearch(table);
+            DrawGridTopDivider();
 
-            if (_isSearching || (_searchDirty && !string.IsNullOrEmpty(_dataSearch)))
-            {
-                DrawSpreadsheetHeadersOnly(table);
-                DrawSearchLoadingState();
-                DrawPaginationBar(table, false);
-            }
+            bool searching = _isSearching || (_searchDirty && !string.IsNullOrEmpty(_dataSearch));
+            float pageH = ToolbarStripHeight();
+            Rect block = GUILayoutUtility.GetRect(0f, 0f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+            float reserved = Mathf.Min(pageH, Mathf.Max(0f, block.height));
+            Rect pageRect = new(block.x, block.yMax - reserved, block.width, reserved);
+            Rect gridRect = new(block.x, block.y, block.width, Mathf.Max(0f, block.height - reserved));
+
+            if (searching)
+                DrawSpreadsheetHeadersOnly(table, gridRect);
             else
-            {
-                DrawSpreadsheet(table);
-                DrawPaginationBar(table, true);
-            }
+                DrawSpreadsheet(table, gridRect);
+            DrawPaginationBar(table, pageRect, !searching);
+            if (searching)
+                Repaint();
 
             EditorGUILayout.EndVertical();
         }
@@ -911,16 +938,7 @@ namespace UniConfig.Editor
                 Repaint();
         }
 
-        private void DrawSearchLoadingState()
-        {
-            EditorGUILayout.Space(12);
-            int dots = (int)(EditorApplication.timeSinceStartup * 3d) % 4;
-            string suffix = new('.', dots);
-            EditorGUILayout.HelpBox(UniConfigLoc.F("searching_help", suffix), MessageType.Info);
-            Repaint();
-        }
-
-        private void DrawPaginationBar(ConfigTable table, bool interactive)
+        private void DrawPaginationBar(ConfigTable table, Rect bar, bool interactive)
         {
             int pageSize = GetPageSize(table);
             List<int> matched = _displayRowIndices ?? new List<int>();
@@ -933,7 +951,13 @@ namespace UniConfig.Editor
             if (_dataPageIndex < 0)
                 _dataPageIndex = 0;
 
-            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            // 宽表会把布局矩形撑出窗口。GUIClip 不可访问，用窗口右缘把 > 收回可见范围。
+            float visibleRight = position.width - 8f;
+            if (bar.xMax > visibleRight)
+                bar.xMax = Mathf.Max(bar.x, visibleRight);
+
+            if (Event.current.type == EventType.Repaint && bar.width > 1f && bar.height > 1f)
+                EditorStyles.toolbar.Draw(bar, false, false, false, false);
 
             string matchInfo = string.IsNullOrEmpty(_readySearchPattern)
                 ? string.Empty
@@ -941,14 +965,26 @@ namespace UniConfig.Editor
             if (_isSearching || (_searchDirty && !string.IsNullOrEmpty(_dataSearch)))
                 matchInfo = UniConfigLoc.T("searching_tag");
 
-            GUILayout.Label(UniConfigLoc.F("page_info", table.items.Count, matchInfo), EditorStyles.miniLabel);
-            GUILayout.Space(8);
-            GUILayout.Label(UniConfigLoc.T("page_size"), EditorStyles.miniLabel);
+            const float gap = 6f;
+            const float rightPad = 4f;
+            float leftNeed = MeasurePaginationInfoWidth(table, matchInfo, pageCount);
+            // 本帧沿用上一帧的可用宽度，避免 Layout 和 Repaint 的按钮数量不一致。
+            float budget = _pageNavBudget;
+            if (budget < 1f)
+                budget = 240f;
+            Rect info = new(bar.x, bar.y, Mathf.Max(0f, Mathf.Min(leftNeed, bar.width)), bar.height);
+
+            GUI.BeginGroup(info);
+            float x = 6f;
+            float h = info.height;
+            x = DrawPaginationLabel(x, h, UniConfigLoc.F("page_info", table.items.Count, matchInfo));
+            x += gap;
+            x = DrawPaginationLabel(x, h, UniConfigLoc.T("page_size"));
+            x += 4f;
             using (new EditorGUI.DisabledScope(!interactive))
             {
                 EditorGUI.BeginChangeCheck();
-                int edited = EditorGUILayout.DelayedIntField(pageSize, EditorStyles.toolbarTextField,
-                    GUILayout.Width(52));
+                int edited = EditorGUI.DelayedIntField(new Rect(x, 0f, 52f, h), pageSize, EditorStyles.toolbarTextField);
                 if (EditorGUI.EndChangeCheck())
                 {
                     int firstRow = _dataPageIndex * pageSize;
@@ -963,56 +999,204 @@ namespace UniConfig.Editor
                 }
             }
 
-            GUILayout.Space(8);
-            GUILayout.Label(UniConfigLoc.F("page_index", _dataPageIndex + 1, pageCount), EditorStyles.miniLabel);
+            x += 52f + gap;
+            DrawPaginationLabel(x, h, UniConfigLoc.F("page_index", _dataPageIndex + 1, pageCount));
+            GUI.EndGroup();
 
-            GUILayout.FlexibleSpace();
+            float arrowW = PageArrowWidth();
+            Rect nextRect = new(bar.xMax - rightPad - arrowW, bar.y, arrowW, bar.height);
+            GetPageNavLayout(pageCount, budget, out int head, out int tail, out bool ellipsis, out float navWidth);
+            float leadWidth = Mathf.Max(0f, navWidth - arrowW);
+            float leadX = nextRect.x - leadWidth;
+            if (leadX < bar.x)
+                leadX = bar.x;
+            leadWidth = Mathf.Min(leadWidth, Mathf.Max(0f, nextRect.x - leadX));
+            Rect lead = new(leadX, bar.y, leadWidth, bar.height);
+            GUI.BeginGroup(lead);
+            DrawPageNav(new Rect(0f, 0f, lead.width, lead.height), pageCount, head, tail, ellipsis, interactive);
+            GUI.EndGroup();
 
+            using (new EditorGUI.DisabledScope(!interactive || _dataPageIndex >= pageCount - 1))
+            {
+                if (GUI.Button(nextRect, ">", EditorStyles.toolbarButton))
+                    SetDataPageIndex(_dataPageIndex + 1);
+            }
+
+            if (Event.current.type == EventType.Repaint && bar.width > 1f)
+            {
+                float nextBudget = bar.width - MeasurePaginationInfoWidth(table, matchInfo, pageCount) - gap - rightPad;
+                _pageNavBudget = Mathf.Max(48f, nextBudget);
+            }
+        }
+
+        private float MeasurePaginationInfoWidth(ConfigTable table, string matchInfo, int pageCount)
+        {
+            const float gap = 6f;
+            float width = 6f;
+            width += EditorStyles.miniLabel
+                .CalcSize(new GUIContent(UniConfigLoc.F("page_info", table.items.Count, matchInfo))).x;
+            width += gap;
+            width += EditorStyles.miniLabel.CalcSize(new GUIContent(UniConfigLoc.T("page_size"))).x;
+            width += 4f + 52f + gap;
+            int shown = pageCount <= 0 ? 1 : Mathf.Clamp(_dataPageIndex + 1, 1, pageCount);
+            width += EditorStyles.miniLabel
+                .CalcSize(new GUIContent(UniConfigLoc.F("page_index", shown, pageCount))).x;
+            return width;
+        }
+
+        private static float DrawPaginationLabel(float x, float height, string text)
+        {
+            float width = EditorStyles.miniLabel.CalcSize(new GUIContent(text ?? string.Empty)).x;
+            GUI.Label(new Rect(x, 0f, width, height), text, EditorStyles.miniLabel);
+            return x + width;
+        }
+
+        private static float PageArrowWidth()
+        {
+            return Mathf.Max(22f, EditorStyles.toolbarButton.CalcSize(new GUIContent("<")).x);
+        }
+
+        private static float PageEllipsisWidth()
+        {
+            return EditorStyles.miniLabel.CalcSize(new GUIContent("...")).x + 6f;
+        }
+
+        private static float PageNumberWidth(int pageNumber)
+        {
+            float width = EditorStyles.toolbarButton.CalcSize(new GUIContent(pageNumber.ToString())).x;
+            return Mathf.Max(22f, width);
+        }
+
+        /// <summary>
+        /// 页码尽量占满预算：放得下就全显示，否则左边从 1 起、右边收到末页，中间用 ...。
+        /// head 是开头连续页数，tail 是末尾连续页数。
+        /// </summary>
+        private static void GetPageNavLayout(int pageCount, float budget, out int head, out int tail, out bool ellipsis,
+            out float width)
+        {
+            if (pageCount < 1)
+                pageCount = 1;
+            head = 0;
+            tail = 0;
+            ellipsis = false;
+            float arrowW = PageArrowWidth();
+            width = arrowW * 2f;
+
+            float allNumbers = 0f;
+            for (int i = 1; i <= pageCount; i++)
+                allNumbers += PageNumberWidth(i);
+            if (width + allNumbers <= budget + 0.01f)
+            {
+                head = pageCount;
+                width += allNumbers;
+                return;
+            }
+
+            float ellipsisW = PageEllipsisWidth();
+            float remain = Mathf.Max(0f, budget - width - ellipsisW);
+            float used = 0f;
+            while (head + tail < pageCount)
+            {
+                bool added = false;
+                if (head + tail < pageCount)
+                {
+                    float w = PageNumberWidth(head + 1);
+                    if (used + w <= remain + 0.01f)
+                    {
+                        used += w;
+                        head++;
+                        added = true;
+                    }
+                }
+
+                if (head + tail < pageCount)
+                {
+                    float w = PageNumberWidth(pageCount - tail);
+                    if (used + w <= remain + 0.01f)
+                    {
+                        used += w;
+                        tail++;
+                        added = true;
+                    }
+                }
+
+                if (!added)
+                    break;
+            }
+
+            if (head + tail >= pageCount)
+            {
+                head = pageCount;
+                tail = 0;
+                width += allNumbers;
+                return;
+            }
+
+            if (tail <= 0 || head <= 0)
+            {
+                head = 0;
+                tail = 0;
+                used = 0f;
+                float plain = Mathf.Max(0f, budget - width);
+                while (head < pageCount)
+                {
+                    float w = PageNumberWidth(head + 1);
+                    if (used + w > plain + 0.01f)
+                        break;
+                    used += w;
+                    head++;
+                }
+
+                width += used;
+                return;
+            }
+
+            ellipsis = true;
+            width += used + ellipsisW;
+        }
+
+        private void DrawPageNav(Rect bar, int pageCount, int head, int tail, bool ellipsis, bool interactive)
+        {
+            if (pageCount < 1)
+                pageCount = 1;
+            float arrowW = PageArrowWidth();
+            float x = 0f;
             using (new EditorGUI.DisabledScope(!interactive || _dataPageIndex <= 0))
             {
-                if (GUILayout.Button("◀", EditorStyles.toolbarButton, GUILayout.Width(28)))
+                if (GUI.Button(new Rect(x, 0f, arrowW, bar.height), "<", EditorStyles.toolbarButton))
                     SetDataPageIndex(_dataPageIndex - 1);
             }
 
+            x += arrowW;
             using (new EditorGUI.DisabledScope(!interactive))
             {
-                int window = 7;
-                int startPage = Mathf.Max(0, _dataPageIndex - window / 2);
-                int endPage = Mathf.Min(pageCount - 1, startPage + window - 1);
-                startPage = Mathf.Max(0, endPage - window + 1);
-
-                if (startPage > 0)
+                if (ellipsis)
                 {
-                    if (GUILayout.Button("1", EditorStyles.toolbarButton, GUILayout.Width(28)))
-                        SetDataPageIndex(0);
-                    if (startPage > 1)
-                        GUILayout.Label("…", GUILayout.Width(16));
+                    x = DrawPageNumberButtons(x, bar.height, 0, head - 1);
+                    float ellipsisW = PageEllipsisWidth();
+                    GUI.Label(new Rect(x, 0f, ellipsisW, bar.height), "...", EditorStyles.miniLabel);
+                    x += ellipsisW;
+                    x = DrawPageNumberButtons(x, bar.height, pageCount - tail, pageCount - 1);
                 }
-
-                for (int p = startPage; p <= endPage; p++)
+                else
                 {
-                    bool on = p == _dataPageIndex;
-                    if (GUILayout.Toggle(on, (p + 1).ToString(), EditorStyles.toolbarButton, GUILayout.Width(28)) &&
-                        !on)
-                        SetDataPageIndex(p);
-                }
-
-                if (endPage < pageCount - 1)
-                {
-                    if (endPage < pageCount - 2)
-                        GUILayout.Label("…", GUILayout.Width(16));
-                    if (GUILayout.Button(pageCount.ToString(), EditorStyles.toolbarButton, GUILayout.Width(32)))
-                        SetDataPageIndex(pageCount - 1);
-                }
-
-                using (new EditorGUI.DisabledScope(_dataPageIndex >= pageCount - 1))
-                {
-                    if (GUILayout.Button("▶", EditorStyles.toolbarButton, GUILayout.Width(28)))
-                        SetDataPageIndex(_dataPageIndex + 1);
+                    x = DrawPageNumberButtons(x, bar.height, 0, head - 1);
                 }
             }
+        }
 
-            EditorGUILayout.EndHorizontal();
+        private float DrawPageNumberButtons(float x, float height, int first, int last)
+        {
+            for (int p = first; p <= last; p++)
+            {
+                float w = PageNumberWidth(p + 1);
+                bool on = p == _dataPageIndex;
+                if (GUI.Toggle(new Rect(x, 0f, w, height), on, (p + 1).ToString(), EditorStyles.toolbarButton) && !on)
+                    SetDataPageIndex(p);
+                x += w;
+            }
+
+            return x;
         }
 
         private static int GetPageSize(ConfigTable table)
@@ -1389,32 +1573,43 @@ namespace UniConfig.Editor
             return true;
         }
 
-        private void DrawSpreadsheetHeadersOnly(ConfigTable table)
+        private void DrawSpreadsheetHeadersOnly(ConfigTable table, Rect area)
         {
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
-            DrawGridTopDivider();
-
-            Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
-                0f, gridHeight + 8f,
-                GUILayout.ExpandWidth(true),
-                GUILayout.Height(gridHeight + 8f)));
+            float headerH = Mathf.Min(gridHeight + 8f, Mathf.Max(0f, area.height));
+            Rect view = ClampGridView(table, new Rect(area.x, area.y, area.width, headerH));
             RememberGridViewWidth(view);
             UpdateMiscRemarkWidth(table, visibleFieldIndices, false);
             float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
             _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, gridHeight));
             DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, 0f, 0f, out _, out _);
             GUI.EndScrollView();
+
+            if (area.height > headerH + 48f)
+            {
+                int dots = (int)(EditorApplication.timeSinceStartup * 3d) % 4;
+                EditorGUI.HelpBox(
+                    new Rect(area.x + 8f, area.y + headerH + 8f, Mathf.Max(0f, area.width - 16f), 40f),
+                    UniConfigLoc.F("searching_help", new string('.', dots)),
+                    MessageType.Info);
+            }
         }
 
-        private void DrawSpreadsheet(ConfigTable table)
+        private void DrawSpreadsheet(ConfigTable table, Rect gridRect)
         {
             EnsureItemFields(table);
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
-            if (visibleFieldIndices.Count == 0 && table.fields.Count > 0)
-                EditorGUILayout.HelpBox(UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
+            if (visibleFieldIndices.Count == 0 && table.fields.Count > 0 && gridRect.height > 8f)
+            {
+                float warnH = Mathf.Min(40f, gridRect.height);
+                EditorGUI.HelpBox(new Rect(gridRect.x, gridRect.y, gridRect.width, warnH),
+                    UniConfigLoc.T("no_visible_cols"), MessageType.Warning);
+                gridRect.y += warnH;
+                gridRect.height -= warnH;
+            }
 
             const float OpsRowHeight = 24f;
             List<int> matched = _displayRowIndices ?? new List<int>();
@@ -1432,16 +1627,12 @@ namespace UniConfig.Editor
             float rowsContentHeight = Mathf.Max(1f, visibleRows * RowHeight + 4f);
             bool pinHeader = UniConfigEditorSettings.instance.GetPinHeader(table.moduleName, table.tableName);
             float scrollContentHeight = pinHeader ? rowsContentHeight : headerBlock + rowsContentHeight;
-            DrawGridTopDivider();
 
-            Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
-                0f, 0f,
-                GUILayout.ExpandWidth(true),
-                GUILayout.ExpandHeight(true)));
+            Rect view = ClampGridView(table, gridRect);
             if (view.xMax > position.width)
                 view.xMax = Mathf.Max(view.x, position.width);
             float measuredHeight = _gridViewHeight;
-            float outerHeight = measuredHeight > 1f ? measuredHeight : view.height;
+            float outerHeight = view.height > 1f ? view.height : measuredHeight;
             float scrollViewport = pinHeader ? Mathf.Max(0f, outerHeight - headerBlock) : outerHeight;
             bool reserveVerticalScrollbar = scrollViewport > 1f && scrollContentHeight > scrollViewport + 1f;
             RememberGridViewWidth(view);
@@ -2070,23 +2261,38 @@ namespace UniConfig.Editor
         }
 
         /// <summary>
-        /// 在类型行下方绘制列顺序按钮（左移/右移）。
+        /// 在类型行下方绘制列顺序按钮：移到最前、左移、右移、移到最后。
         /// 返回 true 表示结构已变化，应中断本帧后续绘制。
         /// </summary>
         private bool DrawColumnOps(Rect cell, ConfigTable table, int fieldIndex)
         {
-            const float btnW = 28f;
+            const float btnW = 24f;
             const float btnH = 20f;
-            float totalW = btnW * 2f;
-            float startX = cell.x + (cell.width - totalW) * 0.5f;
+            int count = table.fields == null ? 0 : table.fields.Count;
+            int front = FrontIndexAfterMove(table, fieldIndex);
+            bool atFront = fieldIndex == front;
+            bool atEnd = count <= 0 || fieldIndex >= count - 1;
+            float totalW = btnW * 4f;
+            float startX = cell.width >= totalW
+                ? cell.x + (cell.width - totalW) * 0.5f
+                : cell.x;
             float startY = cell.y + (cell.height - btnH) * 0.5f;
 
-            Rect leftRect = new(startX, startY, btnW, btnH);
-            Rect rightRect = new(startX + btnW, startY, btnW, btnH);
+            using (new EditorGUI.DisabledScope(table.misc || atFront))
+            {
+                if (GUI.Button(new Rect(startX, startY, btnW, btnH),
+                        new GUIContent("<<", UniConfigLoc.T("move_front")), _colMoveLeft))
+                {
+                    MoveField(table, fieldIndex, front);
+                    _dirty = true;
+                    return true;
+                }
+            }
 
             using (new EditorGUI.DisabledScope(table.misc || fieldIndex <= 0))
             {
-                if (GUI.Button(leftRect, new GUIContent("<", UniConfigLoc.T("move_left")), EditorStyles.miniButtonLeft))
+                if (GUI.Button(new Rect(startX + btnW, startY, btnW, btnH),
+                        new GUIContent("<", UniConfigLoc.T("move_left")), _colMoveMid))
                 {
                     SwapFields(table, fieldIndex, fieldIndex - 1);
                     _dirty = true;
@@ -2094,10 +2300,10 @@ namespace UniConfig.Editor
                 }
             }
 
-            using (new EditorGUI.DisabledScope(table.misc || fieldIndex >= table.fields.Count - 1))
+            using (new EditorGUI.DisabledScope(table.misc || atEnd))
             {
-                if (GUI.Button(rightRect, new GUIContent(">", UniConfigLoc.T("move_right")),
-                        EditorStyles.miniButtonRight))
+                if (GUI.Button(new Rect(startX + btnW * 2f, startY, btnW, btnH),
+                        new GUIContent(">", UniConfigLoc.T("move_right")), _colMoveMid))
                 {
                     SwapFields(table, fieldIndex, fieldIndex + 1);
                     _dirty = true;
@@ -2105,7 +2311,44 @@ namespace UniConfig.Editor
                 }
             }
 
+            using (new EditorGUI.DisabledScope(table.misc || atEnd))
+            {
+                if (GUI.Button(new Rect(startX + btnW * 3f, startY, btnW, btnH),
+                        new GUIContent(">>", UniConfigLoc.T("move_back")), _colMoveRight))
+                {
+                    MoveField(table, fieldIndex, count - 1);
+                    _dirty = true;
+                    return true;
+                }
+            }
+
             return false;
+        }
+
+        /// <summary>
+        /// 移到最前之后的下标。有 id 列时排在 id 后面；移动的就是 id 列时放到 0。
+        /// </summary>
+        private static int FrontIndexAfterMove(ConfigTable table, int from)
+        {
+            int idIndex = FindIdColumn(table);
+            if (idIndex < 0 || from == idIndex)
+                return 0;
+            // 先删掉再插入：from 在 id 前面时，id 会左移一格，插在旧的 id 下标才是 id 后面。
+            return from < idIndex ? idIndex : idIndex + 1;
+        }
+
+        private static int FindIdColumn(ConfigTable table)
+        {
+            if (table?.fields == null)
+                return -1;
+            for (int i = 0; i < table.fields.Count; i++)
+            {
+                if (string.Equals(table.fields[i].name, UniConfigEditorSettings.AutoRowIdFieldName,
+                        StringComparison.Ordinal))
+                    return i;
+            }
+
+            return -1;
         }
 
         #endregion
@@ -2697,6 +2940,10 @@ namespace UniConfig.Editor
                 fontSize = 10
             };
 
+            _colMoveLeft = TightColumnMoveStyle(EditorStyles.miniButtonLeft);
+            _colMoveMid = TightColumnMoveStyle(EditorStyles.miniButtonMid);
+            _colMoveRight = TightColumnMoveStyle(EditorStyles.miniButtonRight);
+
             _rowDeleteStyle = new GUIStyle(EditorStyles.miniButton)
             {
                 alignment = TextAnchor.MiddleCenter,
@@ -2725,6 +2972,18 @@ namespace UniConfig.Editor
             };
 
             _stylesReady = true;
+        }
+
+        private static GUIStyle TightColumnMoveStyle(GUIStyle source)
+        {
+            return new GUIStyle(source)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 11,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+                clipping = TextClipping.Clip
+            };
         }
 
         #endregion
@@ -2978,6 +3237,16 @@ namespace UniConfig.Editor
             ConfigField tmp = table.fields[a];
             table.fields[a] = table.fields[b];
             table.fields[b] = tmp;
+        }
+
+        private static void MoveField(ConfigTable table, int from, int finalIndex)
+        {
+            if (table?.fields == null || from < 0 || from >= table.fields.Count || from == finalIndex)
+                return;
+            ConfigField field = table.fields[from];
+            table.fields.RemoveAt(from);
+            finalIndex = Mathf.Clamp(finalIndex, 0, table.fields.Count);
+            table.fields.Insert(finalIndex, field);
         }
 
         private void TryAction(Action action)

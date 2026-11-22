@@ -108,6 +108,8 @@ namespace UniConfig.Editor
             ["type"] = new[] { "类型", "Type" },
             ["move_left"] = new[] { "左移列", "Move left" },
             ["move_right"] = new[] { "右移列", "Move right" },
+            ["move_front"] = new[] { "移到最前。有 id 列时排在 id 后面", "Move to front. Stays after id when that column exists" },
+            ["move_back"] = new[] { "移到最后", "Move to end" },
             ["no_fields"] = new[] { "(无字段)", "(No fields)" },
 
             // 分页 / 搜索 / 加载
