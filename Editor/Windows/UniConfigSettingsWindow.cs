@@ -14,10 +14,13 @@ namespace UniConfig.Editor
     {
         private ReorderableList _enumReorderableList;
         private Vector2 _scroll;
+        private bool _capturingHotkey;
 
         private void OnEnable()
         {
-            UniConfigEditorSettings.instance.EnsureDefaultRowColorTags();
+            UniConfigEditorSettings settings = UniConfigEditorSettings.instance;
+            settings.EnsureDefaultRowColorTags();
+            settings.EnsureEditorHotkeyDefaults();
             RebuildEnumList();
         }
 
@@ -119,6 +122,12 @@ namespace UniConfig.Editor
             EditorGUILayout.LabelField(UniConfigLoc.T("settings.editor"), EditorStyles.boldLabel);
             settings.autoSaveOnClose =
                 EditorGUILayout.Toggle(UniConfigLoc.T("settings.auto_save_close"), settings.autoSaveOnClose);
+            settings.editorHotkeyEnabled =
+                EditorGUILayout.Toggle(UniConfigLoc.T("settings.hotkey"), settings.editorHotkeyEnabled);
+            if (!settings.editorHotkeyEnabled)
+                StopHotkeyCapture();
+            using (new EditorGUI.DisabledScope(!settings.editorHotkeyEnabled))
+                DrawHotkeyField(settings);
             bool prevAutoRowId = settings.autoRowIdField;
             settings.autoRowIdField =
                 EditorGUILayout.Toggle(UniConfigLoc.T("settings.auto_row_id"), settings.autoRowIdField);
@@ -156,11 +165,63 @@ namespace UniConfig.Editor
 
         private void OnDisable()
         {
+            StopHotkeyCapture();
             UniConfigEditorSettings settings = UniConfigEditorSettings.instance;
             if (settings == null) return;
             NormalizeEnumTypes(settings, removeEmpty: true);
             EnumTypeUtil.ClearCache();
             settings.SaveSettings();
+        }
+
+        private void DrawHotkeyField(UniConfigEditorSettings settings)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel(UniConfigLoc.T("settings.hotkey.combo"));
+            string label = _capturingHotkey
+                ? UniConfigLoc.T("settings.hotkey.press")
+                : UniConfigEditorHotkey.Format(settings);
+            if (GUILayout.Button(label))
+            {
+                _capturingHotkey = true;
+                UniConfigEditorHotkey.IsCapturing = true;
+                GUI.FocusControl(null);
+            }
+
+            EditorGUILayout.EndHorizontal();
+            if (!_capturingHotkey)
+                return;
+
+            EditorGUILayout.HelpBox(UniConfigLoc.T("settings.hotkey.hint"), MessageType.None);
+            Event current = Event.current;
+            if (current.type != EventType.KeyDown)
+                return;
+
+            if (current.keyCode == KeyCode.Escape)
+            {
+                StopHotkeyCapture();
+                current.Use();
+                return;
+            }
+
+            if (current.keyCode == KeyCode.None || UniConfigEditorHotkey.IsModifierKey(current.keyCode))
+            {
+                current.Use();
+                Repaint();
+                return;
+            }
+
+            settings.editorHotkeyKey = current.keyCode;
+            settings.editorHotkeyModifiers = UniConfigEditorHotkey.Significant(current.modifiers);
+            settings.editorHotkeyReady = true;
+            StopHotkeyCapture();
+            current.Use();
+            GUI.changed = true;
+        }
+
+        private void StopHotkeyCapture()
+        {
+            _capturingHotkey = false;
+            UniConfigEditorHotkey.IsCapturing = false;
         }
 
         /// <summary>

@@ -268,6 +268,22 @@ namespace UniConfig.Editor
             window.Show();
         }
 
+        public static void Toggle()
+        {
+            ConfigEditorWindow[] windows = Resources.FindObjectsOfTypeAll<ConfigEditorWindow>();
+            bool any = false;
+            for (int i = 0; i < windows.Length; i++)
+            {
+                if (windows[i] == null)
+                    continue;
+                any = true;
+                windows[i].Close();
+            }
+
+            if (!any)
+                Open();
+        }
+
         // 内联重命名（类似 Hierarchy）
         private enum RenameTarget
         {

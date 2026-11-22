@@ -196,6 +196,14 @@ namespace UniConfig.Editor
             },
             ["settings.editor"] = new[] { "编辑器", "Editor" },
             ["settings.auto_save_close"] = new[] { "关闭时自动保存", "Auto-save on close" },
+            ["settings.hotkey"] = new[] { "启用快捷键", "Enable hotkey" },
+            ["settings.hotkey.combo"] = new[] { "快捷键", "Shortcut" },
+            ["settings.hotkey.press"] = new[] { "请按下快捷键…", "Press a shortcut…" },
+            ["settings.hotkey.hint"] = new[]
+            {
+                "按下要使用的组合键，Esc 取消。启用后用该快捷键打开或关闭配置编辑器。默认是左 Ctrl + 空格。",
+                "Press the shortcut to use. Esc cancels. When enabled, the shortcut opens or closes the config editor. Default is Left Ctrl + Space."
+            },
             ["settings.color_tags"] = new[] { "行颜色标记", "Row color tags" },
             ["settings.color_tags_hint"] = new[]
             {

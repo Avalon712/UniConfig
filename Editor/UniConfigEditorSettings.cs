@@ -47,6 +47,18 @@ namespace UniConfig.Editor
         /// </summary>
         public bool autoSaveOnClose = true;
 
+        /// <summary>为 true 时，自定义快捷键可以打开或关闭配置编辑器。默认关闭。</summary>
+        public bool editorHotkeyEnabled;
+
+        /// <summary>快捷键主键。None 表示尚未初始化，按左 Ctrl + 空格处理。</summary>
+        public KeyCode editorHotkeyKey = KeyCode.Space;
+
+        /// <summary>快捷键修饰键。默认 Control（左 Ctrl）。</summary>
+        public EventModifiers editorHotkeyModifiers = EventModifiers.Control;
+
+        /// <summary>旧配置没有这两项时补上默认快捷键，且保持关闭。</summary>
+        public bool editorHotkeyReady;
+
         /// <summary>
         /// 为每张表自动维护 int 字段 <see cref="AutoRowIdFieldName"/>，值等于行号（从 1 开始）。
         /// </summary>
@@ -105,6 +117,30 @@ namespace UniConfig.Editor
 
         /// <summary>编辑器每页行数上限，避免一次画出过多行。</summary>
         public const int MaxPageSize = 10000;
+
+        public void EnsureEditorHotkeyDefaults()
+        {
+            if (editorHotkeyReady && editorHotkeyKey != KeyCode.None)
+                return;
+            editorHotkeyEnabled = false;
+            editorHotkeyKey = KeyCode.Space;
+            editorHotkeyModifiers = EventModifiers.Control;
+            editorHotkeyReady = true;
+            SaveSettings();
+        }
+
+        public KeyCode ResolvedHotkeyKey()
+        {
+            return editorHotkeyKey == KeyCode.None ? KeyCode.Space : editorHotkeyKey;
+        }
+
+        public EventModifiers ResolvedHotkeyModifiers()
+        {
+            if (!editorHotkeyReady && editorHotkeyKey == KeyCode.None)
+                return EventModifiers.Control;
+            return editorHotkeyModifiers & (EventModifiers.Alt | EventModifiers.Control | EventModifiers.Shift |
+                                             EventModifiers.Command);
+        }
 
         public bool IsAutoRowIdField(string fieldName)
         {
