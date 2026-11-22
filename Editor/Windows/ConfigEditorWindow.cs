@@ -22,6 +22,11 @@ namespace UniConfig.Editor
         private const float RemarkEdgeMargin = 5f;
         private float _miscRemarkWidth = RemarkColMinWidth;
         private float _gridViewWidth;
+        private float _gridViewHeight;
+        private int _virtualRowFirst = -1;
+        private int _virtualRowLast = -1;
+        private float _virtualScrollY = float.NaN;
+        private const int VirtualRowOverscan = 8;
         private const float RowHeight = 20f;
         private const float HeaderRowHeight = 18f;
         private const float IndexColWidth = 40f;
@@ -830,6 +835,9 @@ namespace UniConfig.Editor
                 _remarkFieldIndex = 0;
                 _dataPageIndex = 0;
                 _gridScroll = Vector2.zero;
+                _virtualRowFirst = -1;
+                _virtualRowLast = -1;
+                _virtualScrollY = float.NaN;
                 ResetAsyncSearchState();
                 ResetColumnSelections(table);
                 RequestLoadCurrentTable(table);
@@ -1194,6 +1202,19 @@ namespace UniConfig.Editor
             if (showRowDeleteNext != showRowDelete)
                 UniConfigEditorSettings.instance.SetShowRowDelete(table.moduleName, table.tableName, showRowDeleteNext);
 
+            bool pinHeader = UniConfigEditorSettings.instance.GetPinHeader(table.moduleName, table.tableName);
+            bool pinHeaderNext = GUILayout.Toggle(pinHeader,
+                Content(UniConfigLoc.T("header.pin"), UniConfigLoc.T("header.pin.tip")),
+                EditorStyles.toolbarButton,
+                GUILayout.Width(ToolbarButtonWidth(UniConfigLoc.T("header.pin"), false)));
+            if (pinHeaderNext != pinHeader)
+            {
+                UniConfigEditorSettings.instance.SetPinHeader(table.moduleName, table.tableName, pinHeaderNext);
+                _virtualRowFirst = -1;
+                _virtualRowLast = -1;
+                _virtualScrollY = float.NaN;
+            }
+
             if (searchTextChanged || searchColumnsChanged)
                 MarkSearchDirty();
 
@@ -1374,6 +1395,7 @@ namespace UniConfig.Editor
             List<int> visibleFieldIndices = GetVisibleFieldIndices(table);
             const float OpsRowHeight = 24f;
             float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + 8;
+            DrawGridTopDivider();
 
             Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
                 0f, gridHeight + 8f,
@@ -1406,37 +1428,102 @@ namespace UniConfig.Editor
             int pageEnd = Mathf.Min(pageStart + pageSize, matched.Count);
             int visibleRows = Mathf.Max(0, pageEnd - pageStart);
 
-            float gridHeight = HeaderRowHeight + RowHeight + OpsRowHeight + visibleRows * RowHeight + 8;
-            float contentHeight = Mathf.Max(gridHeight, 200f);
+            const float headerBlock = HeaderRowHeight + RowHeight + OpsRowHeight;
+            float rowsContentHeight = Mathf.Max(1f, visibleRows * RowHeight + 4f);
+            bool pinHeader = UniConfigEditorSettings.instance.GetPinHeader(table.moduleName, table.tableName);
+            float scrollContentHeight = pinHeader ? rowsContentHeight : headerBlock + rowsContentHeight;
+            DrawGridTopDivider();
 
             Rect view = ClampGridView(table, GUILayoutUtility.GetRect(
                 0f, 0f,
                 GUILayout.ExpandWidth(true),
                 GUILayout.ExpandHeight(true)));
+            if (view.xMax > position.width)
+                view.xMax = Mathf.Max(view.x, position.width);
+            float measuredHeight = _gridViewHeight;
+            float outerHeight = measuredHeight > 1f ? measuredHeight : view.height;
+            float scrollViewport = pinHeader ? Mathf.Max(0f, outerHeight - headerBlock) : outerHeight;
+            bool reserveVerticalScrollbar = scrollViewport > 1f && scrollContentHeight > scrollViewport + 1f;
             RememberGridViewWidth(view);
-            bool reserveVerticalScrollbar = view.height > 1f && contentHeight > view.height;
             UpdateMiscRemarkWidth(table, visibleFieldIndices, reserveVerticalScrollbar);
             float gridWidth = GetSpreadsheetContentWidth(table, visibleFieldIndices);
-            // 显式 content 尺寸，避免 GUILayout ScrollView 在改宽/停靠 Tab 时把内容宽度压窄
-            _gridScroll = GUI.BeginScrollView(view, _gridScroll, new Rect(0f, 0f, gridWidth, contentHeight));
+            Rect gridView = view;
+            bool needHScroll = false;
+            if (reserveVerticalScrollbar)
+            {
+                float barWidth = VerticalBarThickness();
+                gridView.width = Mathf.Max(0f, view.width - barWidth);
+                needHScroll = gridWidth > gridView.width + 1f;
+                float barHeight = scrollViewport;
+                if (needHScroll)
+                    barHeight = Mathf.Max(0f, barHeight - HorizontalBarThickness());
+                float barY = pinHeader ? view.y + headerBlock : view.y;
+                Rect verticalBar = new(gridView.xMax, barY, barWidth, barHeight);
+                _gridScroll.y = GUI.VerticalScrollbar(verticalBar, _gridScroll.y, barHeight, 0f, scrollContentHeight);
+            }
+            else
+            {
+                needHScroll = gridWidth > gridView.width + 1f;
+            }
+
+            bool columnOpsChanged = false;
+            Rect scrollView;
+            float rowsTop;
+            if (pinHeader)
+            {
+                Rect headerView = new(gridView.x, view.y, gridView.width, headerBlock);
+                scrollView = new Rect(gridView.x, view.y + headerBlock, gridView.width, scrollViewport);
+                if (Event.current.type == EventType.ScrollWheel && headerView.Contains(Event.current.mousePosition))
+                {
+                    float visibleBody = scrollViewport - (needHScroll ? HorizontalBarThickness() : 0f);
+                    float maxScroll = Mathf.Max(0f, rowsContentHeight - Mathf.Max(0f, visibleBody));
+                    _gridScroll.y = Mathf.Clamp(_gridScroll.y + Event.current.delta.y * 20f, 0f, maxScroll);
+                    Event.current.Use();
+                }
+
+                GUI.BeginGroup(headerView);
+                EditorGUI.DrawRect(new Rect(0f, 0f, headerView.width, headerBlock), HeaderBg);
+                DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, -_gridScroll.x, 0f, out _, out columnOpsChanged);
+                GUI.EndGroup();
+                rowsTop = 0f;
+            }
+            else
+            {
+                float viewHeight = scrollViewport > 1f ? scrollViewport : view.height;
+                scrollView = new Rect(gridView.x, view.y, gridView.width, viewHeight);
+                rowsTop = headerBlock;
+            }
+
+            Rect contentRect = new(0f, 0f, gridWidth, scrollContentHeight);
+            _gridScroll = reserveVerticalScrollbar
+                ? GUI.BeginScrollView(scrollView, _gridScroll, contentRect, false, false,
+                    GUI.skin.horizontalScrollbar, GUIStyle.none)
+                : GUI.BeginScrollView(scrollView, _gridScroll, contentRect);
 
             const float x0 = 0f;
-            float y = 0f;
-            DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, x0, y, out y, out bool columnOpsChanged);
+            if (!pinHeader)
+                DrawSpreadsheetHeaderBlock(table, visibleFieldIndices, x0, 0f, out _, out columnOpsChanged);
+            GetVirtualRowRange(scrollView, gridWidth, rowsTop, visibleRows, out int firstLocal, out int lastLocal);
+            float y = rowsTop;
 
-            if (!columnOpsChanged)
+            if (!columnOpsChanged && lastLocal >= firstLocal)
             {
                 bool highlight = !string.IsNullOrEmpty(_readySearchPattern);
                 bool showColorTag = ShowColorTag(table);
                 bool rowMoved = false;
-                for (int i = pageStart; i < pageEnd && !rowMoved; i++)
+                y = rowsTop + firstLocal * RowHeight;
+                for (int local = firstLocal; local <= lastLocal && !rowMoved; local++)
                 {
+                    int i = pageStart + local;
                     int row = matched[i];
                     if (row < 0 || row >= table.items.Count)
+                    {
+                        y += RowHeight;
                         continue;
+                    }
 
                     ConfigItem item = table.items[row];
-                    bool even = (i - pageStart) % 2 == 0;
+                    bool even = local % 2 == 0;
                     Color rowBg = highlight ? RowMatch : even ? RowEven : RowOdd;
 
                     float x = x0;
@@ -1477,6 +1564,7 @@ namespace UniConfig.Editor
                         Rect fieldRect = Inset(cell, 1);
                         bool formulaLocked = ConstraintEvaluator.IsFormulaField(table, field.name);
                         bool autoRowId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
+                        GUI.SetNextControlName(CellControlName(row, field.name));
                         if (table.misc && DrawMiscSpecialCell(fieldRect, table, row, field, item))
                         {
                             x += colWidth;
@@ -1572,6 +1660,88 @@ namespace UniConfig.Editor
             if (Event.current.type == EventType.Layout || view.width <= 1f)
                 return;
             _gridViewWidth = view.width;
+            if (view.height > 1f)
+                _gridViewHeight = view.height;
+        }
+
+        /// <summary>
+        /// 只画滚动视口里的行。行范围只在 Layout 更新，同一帧里的后续事件沿用它。
+        /// 正在编辑单元格时保持这批行不变，避免控件序号随滚动变化把输入写到别的格子。
+        /// </summary>
+        private void GetVirtualRowRange(Rect view, float gridWidth, float rowsTop, int rowCount, out int first,
+            out int last)
+        {
+            first = 0;
+            last = rowCount - 1;
+            if (rowCount <= 0)
+            {
+                last = -1;
+                _virtualRowFirst = 0;
+                _virtualRowLast = -1;
+                return;
+            }
+
+            bool cacheValid = _virtualRowLast >= _virtualRowFirst && _virtualRowFirst >= 0 &&
+                               _virtualRowFirst < rowCount;
+            bool layout = Event.current.type == EventType.Layout;
+            bool scrollMatches = !float.IsNaN(_virtualScrollY) && Mathf.Abs(_gridScroll.y - _virtualScrollY) <= 0.5f;
+            // 滚动条或滚轮已经改了位置时，不再钉住旧行，否则拖动滚动条只会露出空白。
+            if (cacheValid && (!layout || (IsEditingVirtualCell() && scrollMatches)))
+            {
+                first = _virtualRowFirst;
+                last = Mathf.Min(_virtualRowLast, rowCount - 1);
+                return;
+            }
+
+            if (!layout)
+                return;
+
+            float viewHeight = view.height > 1f ? view.height : _gridViewHeight;
+            if (viewHeight <= 1f)
+                return;
+
+            if (gridWidth > view.width + 1f)
+            {
+                viewHeight = Mathf.Max(RowHeight, viewHeight - HorizontalBarThickness());
+            }
+
+            float top = _gridScroll.y;
+            float bottom = top + viewHeight;
+            first = Mathf.FloorToInt((top - rowsTop) / RowHeight) - VirtualRowOverscan;
+            last = Mathf.CeilToInt((bottom - rowsTop) / RowHeight) + VirtualRowOverscan;
+            if (first < 0)
+                first = 0;
+            if (last >= rowCount)
+                last = rowCount - 1;
+            if (last < first)
+                last = first;
+            _virtualRowFirst = first;
+            _virtualRowLast = last;
+            _virtualScrollY = _gridScroll.y;
+        }
+
+        private static float VerticalBarThickness()
+        {
+            float width = GUI.skin.verticalScrollbar.fixedWidth;
+            return width >= 12f ? width : 14f;
+        }
+
+        private static float HorizontalBarThickness()
+        {
+            float height = GUI.skin.horizontalScrollbar.fixedHeight;
+            return height >= 8f ? height : 14f;
+        }
+
+        private static bool IsEditingVirtualCell()
+        {
+            string focused = GUI.GetNameOfFocusedControl();
+            return !string.IsNullOrEmpty(focused) &&
+                   (focused.StartsWith("UniConfigCell_") || focused.StartsWith("UniConfigRange_"));
+        }
+
+        private static string CellControlName(int row, string fieldName)
+        {
+            return "UniConfigCell_" + row + "_" + fieldName;
         }
 
         /// <summary>
@@ -1598,10 +1768,7 @@ namespace UniConfig.Editor
             float inner = _gridViewWidth - GridScrollPadX;
             if (reserveVerticalScrollbar)
             {
-                float scrollbar = GUI.skin.verticalScrollbar.fixedWidth;
-                if (scrollbar < 1f)
-                    scrollbar = 16f;
-                inner -= scrollbar;
+                inner -= VerticalBarThickness();
             }
 
             _miscRemarkWidth = Mathf.Max(RemarkColMinWidth, inner - others);
@@ -2320,6 +2487,13 @@ namespace UniConfig.Editor
         {
             Rect r = GUILayoutUtility.GetRect(1, 1, GUILayout.ExpandHeight(true), GUILayout.Width(1));
             EditorGUI.DrawRect(r, GridLine);
+        }
+
+        private void DrawGridTopDivider()
+        {
+            Rect split = GUILayoutUtility.GetRect(0f, 1f, GUILayout.ExpandWidth(true), GUILayout.Height(1f));
+            if (Event.current.type == EventType.Repaint)
+                EditorGUI.DrawRect(split, GridLine);
         }
 
         /// <returns>单元格数值发生变化。</returns>

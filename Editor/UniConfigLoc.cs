@@ -94,6 +94,12 @@ namespace UniConfig.Editor
             ["add_row.tip"] = new[] { "添加行", "Add row" },
             ["search_cols"] = new[] { "搜索列", "Search Cols" },
             ["visible_cols"] = new[] { "显示列", "Visible Cols" },
+            ["header.pin"] = new[] { "固定表头", "Pin Header" },
+            ["header.pin.tip"] = new[]
+            {
+                "表头固定在顶部。关闭后表头随数据一起滚动",
+                "Keep the header fixed. Turn off to scroll it with the rows"
+            },
             ["delete_row"] = new[] { "删行", "Del Row" },
             ["delete_row.tip"] = new[] { "勾选后每行调序按钮后出现删除按钮", "Show a delete button after the reorder buttons" },
             ["delete_row.confirm"] = new[] { "确认删除第 {0} 行？", "Delete row {0}?" },

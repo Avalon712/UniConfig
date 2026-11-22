@@ -129,6 +129,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RemoveColorTagVisibilityForModule(moduleName);
             UniConfigEditorSettings.instance.RemoveRowReorderForModule(moduleName);
             UniConfigEditorSettings.instance.RemoveRowDeleteForModule(moduleName);
+            UniConfigEditorSettings.instance.RemovePinHeaderForModule(moduleName);
             UniConfigEditorSettings.instance.RemovePageSizeForModule(moduleName);
             ExternalConfigEditor.NotifyEditorDataChanged();
         }
@@ -178,6 +179,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RemoveColorTagVisibility(moduleName, tableName);
             UniConfigEditorSettings.instance.RemoveRowReorder(moduleName, tableName);
             UniConfigEditorSettings.instance.RemoveRowDelete(moduleName, tableName);
+            UniConfigEditorSettings.instance.RemovePinHeader(moduleName, tableName);
             UniConfigEditorSettings.instance.RemovePageSize(moduleName, tableName);
             ExternalConfigEditor.NotifyEditorDataChanged();
         }
@@ -206,6 +208,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RenameColorTagVisibilityTable(moduleName, oldName, newName);
             UniConfigEditorSettings.instance.RenameRowReorderTable(moduleName, oldName, newName);
             UniConfigEditorSettings.instance.RenameRowDeleteTable(moduleName, oldName, newName);
+            UniConfigEditorSettings.instance.RenamePinHeaderTable(moduleName, oldName, newName);
             UniConfigEditorSettings.instance.RenamePageSizeTable(moduleName, oldName, newName);
             if (!table.dataLoaded)
                 ExternalConfigEditor.NotifyEditorDataChanged();
@@ -239,6 +242,7 @@ namespace UniConfig.Editor
             UniConfigEditorSettings.instance.RenameColorTagVisibilityModule(oldName, newName);
             UniConfigEditorSettings.instance.RenameRowReorderModule(oldName, newName);
             UniConfigEditorSettings.instance.RenameRowDeleteModule(oldName, newName);
+            UniConfigEditorSettings.instance.RenamePinHeaderModule(oldName, newName);
             UniConfigEditorSettings.instance.RenamePageSizeModule(oldName, newName);
             SaveModule(module);
             ExternalConfigEditor.BeginSaveBatch();

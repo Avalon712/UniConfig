@@ -100,6 +100,11 @@ namespace UniConfig.Editor
         public List<TableColorTagVisibility> rowDeleteVisibility = new();
 
         /// <summary>
+        /// 每张表的表头是否钉在顶部。没有记录时钉住。
+        /// </summary>
+        public List<TableColorTagVisibility> headerPin = new();
+
+        /// <summary>
         /// 每张表编辑器里一页显示多少行。没有记录时使用 <see cref="DefaultPageSize"/>。
         /// </summary>
         public List<TablePageSize> pageSizeEntries = new();
@@ -314,6 +319,37 @@ namespace UniConfig.Editor
                 entry != null && string.Equals(entry.moduleName, moduleName, StringComparison.Ordinal));
             if (removed > 0)
                 SaveSettings();
+        }
+
+        public bool GetPinHeader(string moduleName, string tableName)
+        {
+            TableColorTagVisibility entry = FindVisibility(headerPin, moduleName, tableName);
+            return entry == null || entry.visible;
+        }
+
+        public void SetPinHeader(string moduleName, string tableName, bool pinned)
+        {
+            SetVisibility(ref headerPin, moduleName, tableName, pinned);
+        }
+
+        public void RenamePinHeaderTable(string moduleName, string oldTableName, string newTableName)
+        {
+            RenameVisibilityTable(headerPin, moduleName, oldTableName, newTableName);
+        }
+
+        public void RenamePinHeaderModule(string oldModuleName, string newModuleName)
+        {
+            RenameVisibilityModule(headerPin, oldModuleName, newModuleName);
+        }
+
+        public void RemovePinHeader(string moduleName, string tableName)
+        {
+            RemoveVisibility(headerPin, moduleName, tableName);
+        }
+
+        public void RemovePinHeaderForModule(string moduleName)
+        {
+            RemoveVisibilityForModule(headerPin, moduleName);
         }
 
         public bool GetShowRowDelete(string moduleName, string tableName)
