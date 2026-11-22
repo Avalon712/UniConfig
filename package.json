@@ -1,7 +1,7 @@
 {
   "name": "org.avalon712.uniconfig",
   "displayName": "UniConfig",
-  "version": "1.1.0",
+  "version": "0.0.1",
   "unity": "2022.3",
   "description": "A high-performance and user-friendly game configuration framework designed for programmers.",
   "repository": {
