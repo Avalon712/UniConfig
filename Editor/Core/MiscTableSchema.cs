@@ -102,6 +102,18 @@ namespace UniConfig.Editor
             return field.type.ToString();
         }
 
+        internal static bool TryGetEnumTypeName(string raw, out string fullName)
+        {
+            fullName = null;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            raw = raw.Trim();
+            if (!raw.StartsWith(EnumPrefix, StringComparison.Ordinal))
+                return false;
+            fullName = raw.Substring(EnumPrefix.Length).Trim();
+            return fullName.Length > 0;
+        }
+
         internal static bool TryParseType(string raw, out ConfigField field)
         {
             field = null;

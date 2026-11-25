@@ -140,6 +140,7 @@ namespace UniConfig.Editor
             titleContent = Content("UniConfig", null, "ScriptableObject Icon", "d_ScriptableObject Icon");
             // 域重载后延迟恢复，确保模块列表已就绪
             EditorApplication.delayCall += RestoreUiStateAfterReload;
+            EnumRepair.SchedulePrompt();
         }
 
         private void RestoreUiStateAfterReload()
@@ -3255,6 +3256,11 @@ namespace UniConfig.Editor
             {
                 action();
                 Repaint();
+            }
+            catch (EnumRepairDeferredException ex)
+            {
+                _status = ex.Message;
+                EditorUtility.DisplayDialog("UniConfig", ex.Message, UniConfigLoc.T("ok"));
             }
             catch (Exception ex)
             {

@@ -551,6 +551,7 @@ namespace UniConfig.Editor
 
         private static void OnAfterAssemblyReloadForExport()
         {
+            EnumRepair.SchedulePrompt();
             if (!SessionState.GetBool(PendingExportSessionKey, false))
                 return;
             SessionState.EraseBool(PendingExportSessionKey);
@@ -559,6 +560,10 @@ namespace UniConfig.Editor
                 EnsureLoaded();
                 ExportConfigsInternal();
                 Debug.Log("[UniConfig] 编译完成，配置导出已自动继续。");
+            }
+            catch (EnumRepairDeferredException ex)
+            {
+                Debug.Log("[UniConfig] " + ex.Message);
             }
             catch (Exception ex)
             {
@@ -589,6 +594,7 @@ namespace UniConfig.Editor
         private static void ExportConfigsInternal()
         {
             EnsureLoaded();
+            EnumRepair.EnsureResolvedForExport();
             EnsureExportTableNamesUnique();
 
             Dictionary<string, List<ExportTableData>> groups = new(StringComparer.Ordinal);

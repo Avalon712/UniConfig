@@ -48,6 +48,36 @@ namespace UniConfig.Editor
                 "无法添加枚举「{0}」：{1}\n请确认脚本已编译且类型为 enum。",
                 "Cannot add enum \"{0}\": {1}\nEnsure scripts compiled and the type is an enum."
             },
+            ["enum_repair.title"] = new[] { "修复枚举数据", "Repair Enum Data" },
+            ["enum_repair.help"] = new[]
+            {
+                "自定义枚举的成员发生了变化（改名、删除，或相同名称的顺序/数值变了），或者单元格里还有无法解析的旧值。请把每一项旧数据指定到新的枚举成员。默认按同名对应；如果是整体调换了顺序，可用「按原顺序对应」。",
+                "Custom enum members changed (rename, delete, or same names with a new order or value), or some cells still hold values that no longer parse. Map each old entry to a new member. Same-name matching is the default; use match-by-order if the whole list was reordered."
+            },
+            ["enum_repair.old_value"] = new[] { "旧值", "Old Value" },
+            ["enum_repair.old_name"] = new[] { "旧名称", "Old Name" },
+            ["enum_repair.status"] = new[] { "变化", "Change" },
+            ["enum_repair.new_member"] = new[] { "修复为", "Map To" },
+            ["enum_repair.by_name"] = new[] { "按名称对应", "Match by Name" },
+            ["enum_repair.by_order"] = new[] { "按原顺序对应", "Match by Order" },
+            ["enum_repair.status_same"] = new[] { "未变化", "Unchanged" },
+            ["enum_repair.status_value"] = new[] { "顺序或数值已变", "Order or value changed" },
+            ["enum_repair.status_missing"] = new[] { "已删除或改名", "Renamed or removed" },
+            ["enum_repair.status_cell"] = new[] { "无法解析", "Unparsed cell" },
+            ["enum_repair.apply"] = new[] { "应用修复", "Apply Repair" },
+            ["enum_repair.later"] = new[] { "稍后处理", "Later" },
+            ["enum_repair.no_members"] = new[]
+                { "该枚举当前没有成员，无法修复。", "This enum has no members, so it cannot be repaired." },
+            ["enum_repair.done"] = new[]
+            {
+                "枚举修复完成：{0} 个类型，改写 {1} 处单元格。",
+                "Enum repair finished: {0} type(s), {1} cell(s) rewritten."
+            },
+            ["enum_repair.export_blocked"] = new[]
+                { "已取消导出：枚举数据还没有修复。", "Export cancelled: enum data has not been repaired." },
+            ["enum_repair.none_value"] = new[] { "—", "—" },
+            ["enum_repair.scanning"] = new[] { "正在检查枚举数据", "Checking enum data" },
+            ["enum_repair.applying"] = new[] { "正在写回枚举数据", "Rewriting enum data" },
             ["type_cat.scalar"] = new[] { "基础", "Scalar" },
             ["type_cat.array1d"] = new[] { "一维数组", "Array 1D" },
             ["type_cat.array2d"] = new[] { "二维数组", "Array 2D" },

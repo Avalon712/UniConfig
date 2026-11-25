@@ -38,6 +38,12 @@ namespace UniConfig.Editor
         public List<string> customEnumTypeFullNames = new();
 
         /// <summary>
+        /// 每个自定义枚举上次记录的成员（底层值 + 名称）。
+        /// 用来发现改名、删除，以及同名但顺序或数值变了。
+        /// </summary>
+        public List<EnumTypeSnapshot> enumMemberSnapshots = new();
+
+        /// <summary>
         /// 窗口预设
         /// </summary>
         public string prefs;
@@ -653,5 +659,21 @@ namespace UniConfig.Editor
         public string moduleName;
         public string tableName;
         public List<string> columns = new();
+    }
+
+    /// <summary>某个自定义枚举的成员快照。</summary>
+    [Serializable]
+    public sealed class EnumTypeSnapshot
+    {
+        public string typeFullName;
+        public List<EnumMemberSnapshot> members = new();
+    }
+
+    /// <summary>枚举成员快照：底层数值 + 名称。</summary>
+    [Serializable]
+    public sealed class EnumMemberSnapshot
+    {
+        public long value;
+        public string name;
     }
 }
