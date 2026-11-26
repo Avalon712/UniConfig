@@ -26,6 +26,7 @@ namespace UniConfig.Editor
         private Vector2 _helpScroll;
         private Vector2 _listScroll;
 
+        private string _fkValidatedSignature;
         private string _moduleName;
         private string _pendingApplySignature = string.Empty;
         private int _selectedIndex = -1;
@@ -273,6 +274,10 @@ namespace UniConfig.Editor
                 return;
             }
 
+            string previousModule = c.fkModule ?? string.Empty;
+            string previousTable = c.fkTable ?? string.Empty;
+            string previousField = c.fkField ?? string.Empty;
+
             EditorGUI.BeginChangeCheck();
             int moduleIndex = Mathf.Max(0, Array.IndexOf(modules, c.fkModule));
             moduleIndex = EditorGUILayout.Popup(UniConfigLoc.T("constraint.fk_module"), moduleIndex, modules);
@@ -284,12 +289,7 @@ namespace UniConfig.Editor
             if (tables.Length == 0)
             {
                 EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.no_tables"), MessageType.Warning);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    hostTable.MarkFkValidationDirty();
-                    ConstraintEvaluator.EnsureForeignKeyState(hostTable);
-                }
-
+                RefreshForeignKeyIfEdited(hostTable, c, previousModule, previousTable, previousField);
                 return;
             }
 
@@ -312,11 +312,7 @@ namespace UniConfig.Editor
                 c.fkField = fields[fieldIndex];
             }
 
-            if (EditorGUI.EndChangeCheck())
-            {
-                hostTable.MarkFkValidationDirty();
-                ConstraintEvaluator.EnsureForeignKeyState(hostTable);
-            }
+            RefreshForeignKeyIfEdited(hostTable, c, previousModule, previousTable, previousField);
 
             if (hostTable.TryGetField(c.targetField, out ConfigField targetField) &&
                 ConstraintEvaluator.IsBasicArray1D(targetField.type))
@@ -328,6 +324,35 @@ namespace UniConfig.Editor
                         ? UniConfigLoc.T("constraint.fk_invalid_status")
                         : hostTable.fkStatusDetail,
                     MessageType.Error);
+        }
+
+        /// <summary>
+        /// 下拉框在没有已存引用时会显示第一项，并把这一项写进约束。
+        /// 这种自动填入不会让 Popup 报变化，校验结果会一直停在空配置上。
+        /// </summary>
+        private void RefreshForeignKeyIfEdited(
+            ConfigTable hostTable,
+            FieldConstraint c,
+            string previousModule,
+            string previousTable,
+            string previousField)
+        {
+            bool normalized =
+                !string.Equals(previousModule, c.fkModule ?? string.Empty, StringComparison.Ordinal) ||
+                !string.Equals(previousTable, c.fkTable ?? string.Empty, StringComparison.Ordinal) ||
+                !string.Equals(previousField, c.fkField ?? string.Empty, StringComparison.Ordinal);
+            string signature = string.Join(
+                "\0",
+                c.targetField ?? string.Empty,
+                c.fkModule ?? string.Empty,
+                c.fkTable ?? string.Empty,
+                c.fkField ?? string.Empty);
+            bool unseen = !string.Equals(signature, _fkValidatedSignature, StringComparison.Ordinal);
+            if (!EditorGUI.EndChangeCheck() && !normalized && !unseen)
+                return;
+            _fkValidatedSignature = signature;
+            hostTable.MarkFkValidationDirty();
+            ConstraintEvaluator.EnsureForeignKeyState(hostTable);
         }
 
         private static string KindLabel(FieldConstraint c)
