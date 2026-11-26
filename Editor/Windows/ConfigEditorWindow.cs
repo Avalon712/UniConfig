@@ -556,25 +556,12 @@ namespace UniConfig.Editor
             if (forceExpand)
                 _expandedModules.Add(module.moduleName);
 
+            // 点模块行切换折叠。搜索强制展开时只选中，避免一点就收回。
             if (Event.current.type == EventType.MouseDown &&
                 Event.current.button == 0 &&
                 rect.Contains(Event.current.mousePosition))
             {
-                if (foldRect.Contains(Event.current.mousePosition))
-                {
-                    if (_expandedModules.Contains(module.moduleName))
-                        _expandedModules.Remove(module.moduleName);
-                    else
-                        _expandedModules.Add(module.moduleName);
-                    _selectedModule = module.moduleName;
-                    _selectedTable = null;
-                    PersistUiState();
-                }
-                else
-                {
-                    SelectModule(module.moduleName, false);
-                }
-
+                SelectModule(module.moduleName, !forceExpand);
                 Event.current.Use();
             }
         }
