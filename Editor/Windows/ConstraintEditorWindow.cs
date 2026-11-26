@@ -318,6 +318,10 @@ namespace UniConfig.Editor
                 ConstraintEvaluator.EnsureForeignKeyState(hostTable);
             }
 
+            if (hostTable.TryGetField(c.targetField, out ConfigField targetField) &&
+                ConstraintEvaluator.IsBasicArray1D(targetField.type))
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.fk_array_hint"), MessageType.Info);
+
             if (hostTable.IsFkConstraintInvalid(c))
                 EditorGUILayout.HelpBox(
                     string.IsNullOrEmpty(hostTable.fkStatusDetail)
@@ -337,13 +341,6 @@ namespace UniConfig.Editor
 
         private static void DrawRangeEditor(ConfigTable table, FieldConstraint c)
         {
-            EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_hint"), MessageType.Info);
-
-            EditorGUI.BeginChangeCheck();
-            c.rangeMin = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_min"), c.rangeMin);
-            c.rangeMax = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_max"), c.rangeMax);
-            EditorGUI.EndChangeCheck();
-
             ConfigField field = null;
             if (table?.fields != null)
             {
@@ -358,13 +355,31 @@ namespace UniConfig.Editor
                 }
             }
 
-            if (field == null || !ConstraintEvaluator.IsScalarNumeric(field.type, out _))
+            bool numericArray = field != null && ConstraintEvaluator.IsNumericArray1D(field.type);
+            EditorGUILayout.HelpBox(
+                UniConfigLoc.T(numericArray ? "constraint.range_array_hint" : "constraint.range_hint"),
+                MessageType.Info);
+
+            EditorGUI.BeginChangeCheck();
+            c.rangeMin = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_min"), c.rangeMin);
+            c.rangeMax = EditorGUILayout.DoubleField(UniConfigLoc.T("constraint.range_max"), c.rangeMax);
+            if (EditorGUI.EndChangeCheck() && table != null)
+            {
+                table.MarkFkValidationDirty();
+                ConstraintEvaluator.EnsureForeignKeyState(table);
+            }
+
+            if (field == null ||
+                (!ConstraintEvaluator.IsScalarNumeric(field.type, out _) && !numericArray))
                 EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_not_numeric"), MessageType.Error);
             else if (c.rangeMin > c.rangeMax)
                 EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_order"), MessageType.Error);
-            else if (ConstraintEvaluator.IsFormulaField(table, field.name) ||
-                     UniConfigEditorSettings.instance.IsAutoRowIdField(field.name))
+            else if (!numericArray &&
+                     (ConstraintEvaluator.IsFormulaField(table, field.name) ||
+                      UniConfigEditorSettings.instance.IsAutoRowIdField(field.name)))
                 EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_readonly"), MessageType.Warning);
+            else if (numericArray)
+                EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_array_ok"), MessageType.None);
             else
                 EditorGUILayout.HelpBox(UniConfigLoc.T("constraint.range_ok"), MessageType.None);
         }

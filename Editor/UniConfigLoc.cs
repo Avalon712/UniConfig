@@ -78,6 +78,9 @@ namespace UniConfig.Editor
             ["enum_repair.none_value"] = new[] { "—", "—" },
             ["enum_repair.scanning"] = new[] { "正在检查枚举数据", "Checking enum data" },
             ["enum_repair.applying"] = new[] { "正在写回枚举数据", "Rewriting enum data" },
+            ["numeric.overflow"] = new[]
+                { "计算溢出，结果超出 {0} 的范围", "Overflow: result is outside the range of {0}" },
+            ["numeric.invalid"] = new[] { "无法计算该表达式", "Cannot evaluate this expression" },
             ["type_cat.scalar"] = new[] { "基础", "Scalar" },
             ["type_cat.array1d"] = new[] { "一维数组", "Array 1D" },
             ["type_cat.array2d"] = new[] { "二维数组", "Array 2D" },
@@ -292,6 +295,11 @@ namespace UniConfig.Editor
             ["constraint.err_fk_table"] = new[] { "字段 {0}：找不到引用表 {1}/{2}。", "Field {0}: ref table {1}/{2} not found." },
             ["constraint.err_fk_value"] = new[]
                 { "第 {0} 行 {1}='{2}' 不在 {3}/{4}.{5} 中。", "Row {0} {1}='{2}' not in {3}/{4}.{5}." },
+            ["constraint.err_fk_element"] = new[]
+            {
+                "第 {0} 行字段 {1} 的元素 '{2}' 不在 {3}/{4}.{5} 中。",
+                "Row {0} field {1} element '{2}' is not in {3}/{4}.{5}."
+            },
             ["constraint.err_no_target"] = new[] { "未选择目标字段。", "Target field is empty." },
             ["constraint.err_target_missing"] = new[] { "目标字段 {0} 不存在。", "Target field {0} does not exist." },
             ["constraint.err_empty_expr"] = new[] { "字段 {0} 的公式表达式为空。", "Formula for {0} is empty." },
@@ -328,7 +336,22 @@ namespace UniConfig.Editor
                 "Integer or float columns can use an inclusive range. Drag ↔ on the left of a cell to scrub the value; faster mouse movement changes it faster. The rest of the cell can still be typed, and the result is clamped."
             },
             ["constraint.range_not_numeric"] = new[]
-                { "范围约束只能用在整数或浮点列上。", "Range constraints only apply to integer or floating-point columns." },
+            {
+                "范围约束只能用在整数、浮点列，或由它们组成的一维数组上。",
+                "Range constraints only apply to integer or float columns, or one-dimensional arrays of those types."
+            },
+            ["constraint.range_array_hint"] = new[]
+            {
+                "一维数组的每个元素都要落在这个闭区间里。有元素超出范围时单元格变红，输入内容会保留。",
+                "Every element of a one-dimensional array must lie in this inclusive range. A cell turns red when an element is outside it, and the typed text is kept."
+            },
+            ["constraint.range_array_ok"] = new[]
+            {
+                "数组里的每个元素都会按这个范围检查。",
+                "Each array element is checked against this range."
+            },
+            ["constraint.range_invalid_status"] = new[]
+                { "数组元素超出范围", "Array element is outside the range" },
             ["constraint.range_order"] = new[]
                 { "最小值不能大于最大值。", "Min cannot be greater than max." },
             ["constraint.range_readonly"] = new[]
@@ -340,8 +363,8 @@ namespace UniConfig.Editor
                 { "范围内的值可以在表里拖动或输入。", "Values inside the range can be dragged or typed in the grid." },
             ["constraint.err_range_type"] = new[]
             {
-                "字段 {0} 不是整数或浮点列，不能使用范围约束。",
-                "Field {0} is not an integer or float column, so it cannot use a range constraint."
+                "字段 {0} 不是整数、浮点列或对应的一维数组，不能使用范围约束。",
+                "Field {0} is not an integer, float, or matching one-dimensional array, so it cannot use a range constraint."
             },
             ["constraint.err_range_order"] = new[]
                 { "字段 {0} 的范围最小值大于最大值。", "Field {0} has min greater than max." },
@@ -358,6 +381,21 @@ namespace UniConfig.Editor
             {
                 "外键不合法：第 {0} 行字段 {1}='{2}' 是 {3}/{4}.{5} 的外键，引用表中不存在该值",
                 "FK invalid: row {0} field {1}='{2}' references {3}/{4}.{5}, value not found in ref table"
+            },
+            ["constraint.fk_detail_element"] = new[]
+            {
+                "外键不合法：第 {0} 行字段 {1} 的元素 '{2}' 在 {3}/{4}.{5} 中不存在",
+                "FK invalid: row {0} field {1} element '{2}' was not found in {3}/{4}.{5}"
+            },
+            ["constraint.fk_array_hint"] = new[]
+            {
+                "这是一维数组。用逗号分开的每个元素都必须出现在引用列中，空单元格不检查。",
+                "This is a one-dimensional array. Every comma-separated element must appear in the referenced column. An empty cell is skipped."
+            },
+            ["constraint.range_detail_element"] = new[]
+            {
+                "范围不合法：第 {0} 行字段 {1} 的元素 '{2}' 不在 [{3}, {4}] 内",
+                "Range invalid: row {0} field {1} element '{2}' is outside [{3}, {4}]"
             },
             ["constraint.fk_detail_missing_table"] = new[]
             {
@@ -377,8 +415,8 @@ namespace UniConfig.Editor
             ["constraint.formula_done"] = new[] { "公式已计算，更新 {0} 个单元格", "Formula computed, {0} cell(s) updated" },
             ["constraint.help"] = new[]
             {
-                "外键：目标字段值必须存在于引用表指定列，可用「校验外键」检查。\n公式：在 {{}} 中写本表字段或 模块/表.字段，如 ({attack}-{defend})*2 或 {value}+{Test2Module/Skill.attack}。\n有公式约束的字段在表里不可编辑；改依赖字段会自动重算。表达式合法后自动全表算一遍。「全部重算」可手动再算。\n范围：整数或浮点列限制在最小值和最大值之间。表里该列左侧出现 ↔，按住左右拖可改数值，鼠标越快数值变得越快。最后点「保存」写入文件。",
-                "FK: values must exist in the referenced column; use Validate FK.\nFormula: write {field} or {Module/Table.field} inside braces, e.g. ({attack}-{defend})*2.\nFormula fields are read-only; changing dependencies auto-recalculates. A full apply runs when the formula becomes valid. Use Recalc All anytime.\nRange: integer or float columns are clamped between min and max. Drag ↔ on the left of the cell; faster mouse movement changes the value faster. Click Save to persist."
+                "外键：目标字段值必须存在于引用表指定列，可用「校验外键」检查。一维数组（如 int[]）按逗号拆开，每个元素都要在引用列中。\n公式：在 {{}} 中写本表字段或 模块/表.字段，如 ({attack}-{defend})*2 或 {value}+{Test2Module/Skill.attack}。\n有公式约束的字段在表里不可编辑；改依赖字段会自动重算。表达式合法后自动全表算一遍。「全部重算」可手动再算。\n范围：整数或浮点列限制在最小值和最大值之间。表里该列左侧出现 ↔，按住左右拖可改数值，鼠标越快数值变得越快。一维数组则逐个元素检查，超出的单元格变红且不改写输入。最后点「保存」写入文件。",
+                "FK: values must exist in the referenced column; use Validate FK. A one-dimensional array such as int[] is split on commas, and every element must appear in that column.\nFormula: write {field} or {Module/Table.field} inside braces, e.g. ({attack}-{defend})*2.\nFormula fields are read-only; changing dependencies auto-recalculates. A full apply runs when the formula becomes valid. Use Recalc All anytime.\nRange: integer or float columns are clamped between min and max. Drag ↔ on the left of the cell; faster mouse movement changes the value faster. One-dimensional arrays are checked per element; an out-of-range cell turns red and the text is kept. Click Save to persist."
             }
         };
 

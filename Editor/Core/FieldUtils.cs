@@ -309,27 +309,22 @@ namespace UniConfig.Editor
             if (string.IsNullOrWhiteSpace(fieldValue))
                 return GetDefaultValue(fieldType);
 
+            if (ConstraintEvaluator.IsScalarNumeric(fieldType, out _))
+            {
+                NumericEvalStatus status = NumericExpression.Evaluate(fieldValue, fieldType, out object boxed, out _);
+                if (status == NumericEvalStatus.Ok)
+                    return boxed;
+                if (status == NumericEvalStatus.Overflow)
+                    throw new FormatException(
+                        $"计算溢出，无法将 \"{fieldValue}\" 表示为 {GetDisplayName(fieldType)}");
+                throw new FormatException($"无法将 \"{fieldValue}\" 解析为 {GetDisplayName(fieldType)}");
+            }
+
             string value = fieldValue.Trim();
             try
             {
                 switch (fieldType)
                 {
-                    case SupportableFieldType.Int16:
-                        return short.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.Int32:
-                        return int.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.Int64:
-                        return long.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.UInt16:
-                        return ushort.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.UInt32:
-                        return uint.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.UInt64:
-                        return ulong.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.Single:
-                        return float.Parse(value, CultureInfo.InvariantCulture);
-                    case SupportableFieldType.Double:
-                        return double.Parse(value, CultureInfo.InvariantCulture);
                     case SupportableFieldType.Boolean:
                         return ParseBool(value);
                     case SupportableFieldType.String:

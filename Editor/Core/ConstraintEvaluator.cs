@@ -70,15 +70,18 @@ namespace UniConfig.Editor
                 }
 
                 HashSet<string> allowed = GetForeignKeyAllowedValues(refTable, c.fkModule, c.fkTable, c.fkField);
+                bool elementMode = IsBasicArray1D(FindField(table, c.targetField)?.type ?? SupportableFieldType.String);
                 for (int row = 0; row < table.items.Count; row++)
                 {
-                    string value = table.items[row].GetValue(c.targetField);
-                    if (string.IsNullOrWhiteSpace(value))
+                    if (!TryGetForeignKeyMiss(
+                            table.items[row].GetValue(c.targetField),
+                            allowed,
+                            elementMode,
+                            out string reported))
                         continue;
-                    if (!allowed.Contains(value.Trim()))
-                        errors.Add(UniConfigLoc.F(
-                            "constraint.err_fk_value",
-                            row + 1, c.targetField, value, c.fkModule, c.fkTable, c.fkField));
+                    errors.Add(UniConfigLoc.F(
+                        elementMode ? "constraint.err_fk_element" : "constraint.err_fk_value",
+                        row + 1, c.targetField, reported, c.fkModule, c.fkTable, c.fkField));
                 }
             }
 
@@ -95,9 +98,12 @@ namespace UniConfig.Editor
 
             table.fkCellViolations ??= new HashSet<string>();
             table.fkInvalidTargetFields ??= new HashSet<string>(StringComparer.Ordinal);
+            table.rangeCellViolations ??= new HashSet<string>();
             table.fkCellViolations.Clear();
             table.fkInvalidTargetFields.Clear();
+            table.rangeCellViolations.Clear();
             table.fkStatusDetail = string.Empty;
+            table.rangeStatusDetail = string.Empty;
             table.fkValidationDirty = false;
 
             if (table.constraints == null || table.items == null || !table.dataLoaded)
@@ -142,26 +148,27 @@ namespace UniConfig.Editor
                 }
 
                 HashSet<string> allowed = GetForeignKeyAllowedValues(refTable, c.fkModule, c.fkTable, c.fkField);
+                bool elementMode = IsBasicArray1D(FindField(table, c.targetField)?.type ?? SupportableFieldType.String);
                 bool anyBad = false;
                 for (int row = 0; row < table.items.Count; row++)
                 {
-                    string value = table.items[row].GetValue(c.targetField);
-                    if (string.IsNullOrWhiteSpace(value))
+                    if (!TryGetForeignKeyMiss(
+                            table.items[row].GetValue(c.targetField),
+                            allowed,
+                            elementMode,
+                            out string reported))
                         continue;
-                    if (!allowed.Contains(value.Trim()))
-                    {
-                        anyBad = true;
-                        issueCount++;
-                        table.fkCellViolations.Add(ConfigTable.FkCellKey(row, c.targetField));
-                        firstDetail ??= UniConfigLoc.F(
-                            "constraint.fk_detail_value",
-                            row + 1,
-                            c.targetField,
-                            value.Trim(),
-                            c.fkModule,
-                            c.fkTable,
-                            c.fkField);
-                    }
+                    anyBad = true;
+                    issueCount++;
+                    table.fkCellViolations.Add(ConfigTable.FkCellKey(row, c.targetField));
+                    firstDetail ??= UniConfigLoc.F(
+                        elementMode ? "constraint.fk_detail_element" : "constraint.fk_detail_value",
+                        row + 1,
+                        c.targetField,
+                        reported,
+                        c.fkModule,
+                        c.fkTable,
+                        c.fkField);
                 }
 
                 if (anyBad)
@@ -172,6 +179,229 @@ namespace UniConfig.Editor
                 table.fkStatusDetail = issueCount <= 1
                     ? firstDetail
                     : UniConfigLoc.F("constraint.fk_detail_more", firstDetail, issueCount);
+
+            RefreshArrayRangeState(table);
+        }
+
+        /// <summary>
+        /// 基础一维数组（short/int/long/ushort/uint/ulong/bool/float/double）。
+        /// </summary>
+        public static bool IsBasicArray1D(SupportableFieldType type)
+        {
+            return type >= SupportableFieldType.Array1D_Int16 &&
+                   type <= SupportableFieldType.Array1D_Double;
+        }
+
+        /// <summary>整数或浮点一维数组。bool[] 不能做范围约束。</summary>
+        public static bool IsNumericArray1D(SupportableFieldType type)
+        {
+            return IsBasicArray1D(type) && type != SupportableFieldType.Array1D_Boolean;
+        }
+
+        private static void RefreshArrayRangeState(ConfigTable table)
+        {
+            if (table?.constraints == null || table.items == null || !table.dataLoaded)
+                return;
+
+            string firstDetail = null;
+            int issueCount = 0;
+            foreach (FieldConstraint c in table.constraints)
+            {
+                if (c == null || c.Kind != FieldConstraintKind.Range || string.IsNullOrEmpty(c.targetField))
+                    continue;
+                ConfigField field = FindField(table, c.targetField);
+                if (field == null || !IsNumericArray1D(field.type) || c.rangeMin > c.rangeMax)
+                    continue;
+
+                for (int row = 0; row < table.items.Count; row++)
+                {
+                    if (!TryGetRangeMisses(
+                            table.items[row].GetValue(c.targetField),
+                            field.type,
+                            c.rangeMin,
+                            c.rangeMax,
+                            out string reported))
+                        continue;
+                    issueCount++;
+                    table.rangeCellViolations.Add(ConfigTable.FkCellKey(row, c.targetField));
+                    firstDetail ??= UniConfigLoc.F(
+                        "constraint.range_detail_element",
+                        row + 1,
+                        c.targetField,
+                        reported,
+                        c.rangeMin.ToString(CultureInfo.InvariantCulture),
+                        c.rangeMax.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+
+            if (issueCount > 0 && !string.IsNullOrEmpty(firstDetail))
+                table.rangeStatusDetail = issueCount <= 1
+                    ? firstDetail
+                    : UniConfigLoc.F("constraint.fk_detail_more", firstDetail, issueCount);
+        }
+
+        private static bool TryGetForeignKeyMiss(
+            string raw,
+            HashSet<string> allowed,
+            bool elementMode,
+            out string reported)
+        {
+            reported = null;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            if (!elementMode)
+            {
+                string trimmed = raw.Trim();
+                if (allowed.Contains(trimmed))
+                    return false;
+                reported = trimmed;
+                return true;
+            }
+
+            string[] elements = SplitArrayElements(raw);
+            List<string> bad = new();
+            for (int i = 0; i < elements.Length; i++)
+            {
+                if (elements[i].Length == 0 || !allowed.Contains(elements[i]))
+                    bad.Add(elements[i]);
+            }
+
+            if (bad.Count == 0)
+                return false;
+            reported = string.Join(", ", bad);
+            return true;
+        }
+
+        private static bool TryGetRangeMisses(
+            string raw,
+            SupportableFieldType arrayType,
+            double rangeMin,
+            double rangeMax,
+            out string reported)
+        {
+            reported = null;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            if (!TryGetArrayElementType(arrayType, out SupportableFieldType elementType))
+                return false;
+
+            string[] elements = SplitArrayElements(raw);
+            List<string> bad = new();
+            for (int i = 0; i < elements.Length; i++)
+            {
+                if (!ElementInRange(elements[i], elementType, rangeMin, rangeMax))
+                    bad.Add(elements[i]);
+            }
+
+            if (bad.Count == 0)
+                return false;
+            reported = string.Join(", ", bad);
+            return true;
+        }
+
+        private static bool ElementInRange(
+            string element,
+            SupportableFieldType elementType,
+            double rangeMin,
+            double rangeMax)
+        {
+            if (string.IsNullOrEmpty(element) || !TryParseElementNumber(element, elementType, out double number))
+                return false;
+            return number >= rangeMin && number <= rangeMax;
+        }
+
+        private static string[] SplitArrayElements(string value)
+        {
+            string[] parts = value.Split(',');
+            for (int i = 0; i < parts.Length; i++)
+                parts[i] = parts[i].Trim();
+            return parts;
+        }
+
+        private static bool TryGetArrayElementType(SupportableFieldType type, out SupportableFieldType elementType)
+        {
+            switch (type)
+            {
+                case SupportableFieldType.Array1D_Int16:
+                    elementType = SupportableFieldType.Int16;
+                    return true;
+                case SupportableFieldType.Array1D_Int32:
+                    elementType = SupportableFieldType.Int32;
+                    return true;
+                case SupportableFieldType.Array1D_Int64:
+                    elementType = SupportableFieldType.Int64;
+                    return true;
+                case SupportableFieldType.Array1D_UInt16:
+                    elementType = SupportableFieldType.UInt16;
+                    return true;
+                case SupportableFieldType.Array1D_UInt32:
+                    elementType = SupportableFieldType.UInt32;
+                    return true;
+                case SupportableFieldType.Array1D_UInt64:
+                    elementType = SupportableFieldType.UInt64;
+                    return true;
+                case SupportableFieldType.Array1D_Boolean:
+                    elementType = SupportableFieldType.Boolean;
+                    return true;
+                case SupportableFieldType.Array1D_Single:
+                    elementType = SupportableFieldType.Single;
+                    return true;
+                case SupportableFieldType.Array1D_Double:
+                    elementType = SupportableFieldType.Double;
+                    return true;
+                default:
+                    elementType = default;
+                    return false;
+            }
+        }
+
+        private static bool TryParseElementNumber(string text, SupportableFieldType elementType, out double number)
+        {
+            number = 0;
+            switch (elementType)
+            {
+                case SupportableFieldType.Int16:
+                    if (!short.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out short s))
+                        return false;
+                    number = s;
+                    return true;
+                case SupportableFieldType.Int32:
+                    if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int i))
+                        return false;
+                    number = i;
+                    return true;
+                case SupportableFieldType.Int64:
+                    if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long l))
+                        return false;
+                    number = l;
+                    return true;
+                case SupportableFieldType.UInt16:
+                    if (!ushort.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out ushort us))
+                        return false;
+                    number = us;
+                    return true;
+                case SupportableFieldType.UInt32:
+                    if (!uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint ui))
+                        return false;
+                    number = ui;
+                    return true;
+                case SupportableFieldType.UInt64:
+                    if (!ulong.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong ul))
+                        return false;
+                    number = ul;
+                    return true;
+                case SupportableFieldType.Single:
+                    if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float f) ||
+                        float.IsNaN(f) || float.IsInfinity(f))
+                        return false;
+                    number = f;
+                    return true;
+                case SupportableFieldType.Double:
+                    return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out number) &&
+                           !double.IsNaN(number) && !double.IsInfinity(number);
+                default:
+                    return false;
+            }
         }
 
         /// <summary>
@@ -380,7 +610,7 @@ namespace UniConfig.Editor
                 return errors;
             }
 
-            if (!IsScalarNumeric(field.type, out _))
+            if (!IsScalarNumeric(field.type, out _) && !IsNumericArray1D(field.type))
                 errors.Add(UniConfigLoc.F("constraint.err_range_type", c.targetField));
             if (c.rangeMin > c.rangeMax)
                 errors.Add(UniConfigLoc.F("constraint.err_range_order", c.targetField));

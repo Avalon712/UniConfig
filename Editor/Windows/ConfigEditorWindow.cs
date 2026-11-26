@@ -95,6 +95,14 @@ namespace UniConfig.Editor
         private double _rangeDragValue;
         private string _rangeEditKey;
         private string _rangeEditText;
+        private Rect _rangeEditScreenRect;
+        private ConfigTable _rangeEditTable;
+        private int _rangeEditRow = -1;
+        private ConfigField _rangeEditField;
+        private double _rangeEditMin;
+        private double _rangeEditMax;
+        private NumericEdit _numericEdit;
+        private NumericEdit _numericEditFrame;
 
         private Color GridLine => EditorGUIUtility.isProSkin
             ? new Color(0.12f, 0.12f, 0.12f, 1f)
@@ -244,8 +252,23 @@ namespace UniConfig.Editor
             if (TryHandleRenameHotkeys())
                 return;
 
-            // 按钮不拿键盘焦点。先清掉，后面真正点到的输入框会再拿到焦点，点在别处则结束编辑。
             Event guiEvent = Event.current;
+            _numericEditFrame = null;
+            if (guiEvent.type == EventType.KeyDown &&
+                (guiEvent.keyCode == KeyCode.Return || guiEvent.keyCode == KeyCode.KeypadEnter) &&
+                _numericEdit != null &&
+                string.Equals(GUI.GetNameOfFocusedControl(), _numericEdit.ControlName, StringComparison.Ordinal))
+            {
+                GUIUtility.keyboardControl = 0;
+                EditorGUIUtility.editingTextField = false;
+                guiEvent.Use();
+                Repaint();
+            }
+
+            if (guiEvent.type == EventType.MouseDown && guiEvent.button == 0)
+                FlushNumericEditsIfPointerOutside();
+
+            // 按钮不拿键盘焦点。先清掉，后面真正点到的输入框会再拿到焦点，点在别处则结束编辑。
             int focusedControl = GUIUtility.keyboardControl;
             bool clearFocus = guiEvent.type == EventType.MouseDown && guiEvent.button == 0 && focusedControl != 0;
             if (clearFocus)
@@ -277,6 +300,8 @@ namespace UniConfig.Editor
                 EditorGUIUtility.editingTextField = false;
                 Repaint();
             }
+
+            EndNumericEditFrame();
         }
 
         [MenuItem("UniConfig/Config Editor")]
@@ -1738,11 +1763,24 @@ namespace UniConfig.Editor
                         ConfigField field = table.fields[fi];
                         float colWidth = ColumnWidth(table, field);
                         Rect cell = new(x, y, colWidth, RowHeight);
-                        bool fkError = table.IsFkCellViolation(row, field.name);
-                        DrawCellBackground(cell, fkError ? FkErrorCell : rowBg, true);
-                        Rect fieldRect = Inset(cell, 1);
+                        bool fkError = table.IsFkCellViolation(row, field.name) ||
+                                       table.IsRangeCellViolation(row, field.name);
                         bool formulaLocked = ConstraintEvaluator.IsFormulaField(table, field.name);
                         bool autoRowId = UniConfigEditorSettings.instance.IsAutoRowIdField(field.name);
+                        double rangeMin = 0;
+                        double rangeMax = 0;
+                        bool rangeCell = !formulaLocked && !autoRowId && !field.IsEnum &&
+                                         ConstraintEvaluator.TryGetRange(table, field, out rangeMin, out rangeMax);
+                        bool plainScalar = !formulaLocked && !autoRowId && !field.IsEnum && !rangeCell &&
+                                           ConstraintEvaluator.IsScalarNumeric(field.type, out _);
+                        bool numericError = plainScalar &&
+                                            NumericExpression.ShouldTint(
+                                                item.GetValue(field.name),
+                                                field.type,
+                                                string.Equals(GUI.GetNameOfFocusedControl(),
+                                                    CellControlName(row, field.name), StringComparison.Ordinal));
+                        DrawCellBackground(cell, fkError || numericError ? FkErrorCell : rowBg, true);
+                        Rect fieldRect = Inset(cell, 1);
                         GUI.SetNextControlName(CellControlName(row, field.name));
                         if (table.misc && DrawMiscSpecialCell(fieldRect, table, row, field, item))
                         {
@@ -1765,10 +1803,31 @@ namespace UniConfig.Editor
                                 continue;
                             }
                         }
-                        else if (ConstraintEvaluator.TryGetRange(table, field, out double rangeMin, out double rangeMax))
+                        else if (rangeCell)
                         {
                             if (DrawRangeCell(fieldRect, table, row, field, item, rangeMin, rangeMax))
                                 _dirty = true;
+                        }
+                        else if (plainScalar)
+                        {
+                            string control = CellControlName(row, field.name);
+                            Color prevBg = GUI.backgroundColor;
+                            if (numericError)
+                                GUI.backgroundColor = FkErrorCell;
+                            EditorGUI.BeginChangeCheck();
+                            string value = EditorGUI.TextField(fieldRect, item.GetValue(field.name), _cellStyle);
+                            if (EditorGUI.EndChangeCheck())
+                            {
+                                item.SetValue(field.name, value);
+                                ConstraintEvaluator.RecalculateRowFormulas(table, row);
+                                table.MarkFkValidationDirty();
+                                ConstraintEvaluator.EnsureForeignKeyState(table);
+                                _dirty = true;
+                            }
+
+                            GUI.backgroundColor = prevBg;
+                            if (string.Equals(GUI.GetNameOfFocusedControl(), control, StringComparison.Ordinal))
+                                NoteNumericEdit(control, table, row, field.name, field.type, fieldRect);
                         }
                         else
                         {
@@ -1785,7 +1844,7 @@ namespace UniConfig.Editor
                         }
 
                         // 在输入框之上画完整红框，对齐 TextField 区域（与选中高亮一致）
-                        if (fkError)
+                        if (fkError || numericError)
                             DrawRectBorder(fieldRect, FkErrorBorder, 2f);
 
                         x += colWidth;
@@ -2678,6 +2737,7 @@ namespace UniConfig.Editor
             ConfigTable table = CurrentTable();
             string focusedRemark = FocusedFieldRemark(table);
             bool fkBad = focusedRemark == null && table != null && table.dataLoaded && table.HasFkViolations;
+            bool rangeBad = focusedRemark == null && table != null && table.dataLoaded && table.HasRangeViolations;
             string statusText;
             if (focusedRemark != null)
             {
@@ -2691,6 +2751,12 @@ namespace UniConfig.Editor
                     ? UniConfigLoc.T("constraint.fk_invalid_status")
                     : table.fkStatusDetail;
             }
+            else if (rangeBad)
+            {
+                statusText = string.IsNullOrEmpty(table.rangeStatusDetail)
+                    ? UniConfigLoc.T("constraint.range_invalid_status")
+                    : table.rangeStatusDetail;
+            }
             else
             {
                 statusText = string.IsNullOrEmpty(_status)
@@ -2699,7 +2765,7 @@ namespace UniConfig.Editor
             }
 
             Color prev = GUI.contentColor;
-            if (fkBad)
+            if (fkBad || rangeBad)
                 GUI.contentColor = FkErrorText;
             GUILayout.Label(statusText, EditorStyles.miniLabel);
             GUI.contentColor = prev;
@@ -2763,12 +2829,9 @@ namespace UniConfig.Editor
                 case EventType.MouseDown:
                     if (evt.button == 0 && dragRect.Contains(evt.mousePosition))
                     {
-                        if (_rangeEditKey == controlName &&
-                            ConstraintEvaluator.TryParseScalar(_rangeEditText, out double pending))
+                        if (_rangeEditKey == controlName)
                         {
-                            double clampedPending =
-                                ConstraintEvaluator.ClampScalar(pending, rangeMin, rangeMax, field.type);
-                            changed |= CommitRangeValue(table, row, field, item, stored, clampedPending);
+                            changed |= CommitRangeInput(table, row, field, item, _rangeEditText, rangeMin, rangeMax);
                             stored = item.GetValue(field.name) ?? string.Empty;
                         }
 
@@ -2830,10 +2893,27 @@ namespace UniConfig.Editor
             else if (editing)
                 shown = _rangeEditText;
 
+            if (evt.type == EventType.KeyDown && editing &&
+                (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter) &&
+                string.Equals(GUI.GetNameOfFocusedControl(), controlName, StringComparison.Ordinal))
+            {
+                GUIUtility.keyboardControl = 0;
+                EditorGUIUtility.editingTextField = false;
+                evt.Use();
+            }
+
+            bool tintRange = !dragging && NumericExpression.ShouldTint(shown, field.type, editing);
+            if (tintRange && evt.type == EventType.Repaint)
+                EditorGUI.DrawRect(textRect, FkErrorCell);
+
             GUI.SetNextControlName(controlName);
+            Color prevBg = GUI.backgroundColor;
+            if (tintRange)
+                GUI.backgroundColor = FkErrorCell;
             EditorGUI.BeginChangeCheck();
             string typed = EditorGUI.TextField(textRect, shown, _cellStyle);
             bool textChanged = EditorGUI.EndChangeCheck();
+            GUI.backgroundColor = prevBg;
             bool focusedNow = string.Equals(GUI.GetNameOfFocusedControl(), controlName, StringComparison.Ordinal);
 
             if (dragging)
@@ -2842,9 +2922,9 @@ namespace UniConfig.Editor
             }
             else if (textChanged && focusedNow)
             {
-                _rangeEditKey = controlName;
-                _rangeEditText = typed;
-                if (ConstraintEvaluator.TryParseScalar(typed, out double typedValue))
+                RememberRangeEdit(controlName, textRect, table, row, field, rangeMin, rangeMax, typed);
+                if (ConstraintEvaluator.TryParseScalar(typed, out double typedValue) &&
+                    NumericExpression.FitsType(typedValue, field.type))
                 {
                     double clamped = ConstraintEvaluator.ClampScalar(typedValue, rangeMin, rangeMax, field.type);
                     changed |= CommitRangeValue(table, row, field, item, item.GetValue(field.name), clamped);
@@ -2852,18 +2932,200 @@ namespace UniConfig.Editor
                         _rangeEditText = ConstraintEvaluator.FormatScalar(clamped, field.type);
                 }
             }
+            else if (editing && focusedNow)
+            {
+                _rangeEditScreenRect = GUIUtility.GUIToScreenRect(textRect);
+            }
             else if (editing && !focusedNow)
             {
-                if (ConstraintEvaluator.TryParseScalar(_rangeEditText, out double typedValue))
+                changed |= CommitRangeInput(table, row, field, item, _rangeEditText, rangeMin, rangeMax);
+                _rangeEditKey = null;
+            }
+
+            if (tintRange)
+                DrawRectBorder(textRect, FkErrorBorder, 2f);
+
+            return changed;
+        }
+
+        private void RememberRangeEdit(
+            string controlName,
+            Rect textRect,
+            ConfigTable table,
+            int row,
+            ConfigField field,
+            double rangeMin,
+            double rangeMax,
+            string text)
+        {
+            _rangeEditKey = controlName;
+            _rangeEditText = text;
+            _rangeEditScreenRect = GUIUtility.GUIToScreenRect(textRect);
+            _rangeEditTable = table;
+            _rangeEditRow = row;
+            _rangeEditField = field;
+            _rangeEditMin = rangeMin;
+            _rangeEditMax = rangeMax;
+        }
+
+        private bool CommitRangeInput(
+            ConfigTable table,
+            int row,
+            ConfigField field,
+            ConfigItem item,
+            string raw,
+            double rangeMin,
+            double rangeMax)
+        {
+            if (item == null || string.IsNullOrWhiteSpace(raw))
+                return false;
+            NumericEvalStatus status = NumericExpression.Evaluate(raw, field.type, out object boxed, out _);
+            if (status == NumericEvalStatus.Ok)
+            {
+                double number = Convert.ToDouble(boxed, System.Globalization.CultureInfo.InvariantCulture);
+                double clamped = ConstraintEvaluator.ClampScalar(number, rangeMin, rangeMax, field.type);
+                bool changed = CommitRangeValue(table, row, field, item, item.GetValue(field.name), clamped);
+                ClearNumericStatus(field.type);
+                return changed;
+            }
+
+            if (string.Equals(item.GetValue(field.name), raw, StringComparison.Ordinal))
+            {
+                NoteNumericStatus(status, field.type);
+                return false;
+            }
+
+            item.SetValue(field.name, raw);
+            ConstraintEvaluator.RecalculateRowFormulas(table, row);
+            table.MarkFkValidationDirty();
+            ConstraintEvaluator.EnsureForeignKeyState(table);
+            NoteNumericStatus(status, field.type);
+            return true;
+        }
+
+        private void FlushNumericEditsIfPointerOutside()
+        {
+            Vector2 screenMouse = GUIUtility.GUIToScreenPoint(Event.current.mousePosition);
+            if (_numericEdit != null && !_numericEdit.ScreenRect.Contains(screenMouse))
+            {
+                NumericEdit edit = _numericEdit;
+                _numericEdit = null;
+                ApplyNumericCommit(edit);
+            }
+
+            if (!string.IsNullOrEmpty(_rangeEditKey) && !_rangeEditScreenRect.Contains(screenMouse))
+            {
+                if (_rangeEditTable != null && _rangeEditField != null &&
+                    _rangeEditRow >= 0 && _rangeEditTable.items != null &&
+                    _rangeEditRow < _rangeEditTable.items.Count)
                 {
-                    double clamped = ConstraintEvaluator.ClampScalar(typedValue, rangeMin, rangeMax, field.type);
-                    changed |= CommitRangeValue(table, row, field, item, item.GetValue(field.name), clamped);
+                    if (CommitRangeInput(
+                            _rangeEditTable,
+                            _rangeEditRow,
+                            _rangeEditField,
+                            _rangeEditTable.items[_rangeEditRow],
+                            _rangeEditText,
+                            _rangeEditMin,
+                            _rangeEditMax))
+                        _dirty = true;
                 }
 
                 _rangeEditKey = null;
             }
+        }
 
-            return changed;
+        private void EndNumericEditFrame()
+        {
+            string now = GUI.GetNameOfFocusedControl() ?? string.Empty;
+            if (_numericEdit != null && !string.Equals(now, _numericEdit.ControlName, StringComparison.Ordinal))
+            {
+                bool keep = Event.current.type == EventType.MouseDown &&
+                            _numericEdit.ScreenRect.width > 0f &&
+                            _numericEdit.ScreenRect.Contains(GUIUtility.GUIToScreenPoint(Event.current.mousePosition));
+                if (!keep)
+                {
+                    NumericEdit edit = _numericEdit;
+                    _numericEdit = null;
+                    ApplyNumericCommit(edit);
+                }
+            }
+
+            if (_numericEditFrame != null)
+                _numericEdit = _numericEditFrame;
+            _numericEditFrame = null;
+        }
+
+        private void NoteNumericEdit(
+            string control,
+            ConfigTable table,
+            int row,
+            string fieldName,
+            SupportableFieldType type,
+            Rect fieldRect)
+        {
+            _numericEditFrame = new NumericEdit
+            {
+                ControlName = control,
+                Table = table,
+                Row = row,
+                FieldName = fieldName,
+                Type = type,
+                ScreenRect = GUIUtility.GUIToScreenRect(fieldRect)
+            };
+        }
+
+        private void ApplyNumericCommit(NumericEdit edit)
+        {
+            if (edit?.Table?.items == null || edit.Row < 0 || edit.Row >= edit.Table.items.Count)
+                return;
+            ConfigItem item = edit.Table.items[edit.Row];
+            string raw = item.GetValue(edit.FieldName) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+            if (NumericExpression.TryGetCommittedText(raw, edit.Type, out string committed, out NumericEvalStatus status))
+            {
+                item.SetValue(edit.FieldName, committed);
+                ConstraintEvaluator.RecalculateRowFormulas(edit.Table, edit.Row);
+                edit.Table.MarkFkValidationDirty();
+                ConstraintEvaluator.EnsureForeignKeyState(edit.Table);
+                _dirty = true;
+                ClearNumericStatus(edit.Type);
+                Repaint();
+                return;
+            }
+
+            if (status == NumericEvalStatus.Ok)
+            {
+                ClearNumericStatus(edit.Type);
+                return;
+            }
+
+            NoteNumericStatus(status, edit.Type);
+            Repaint();
+        }
+
+        private void ClearNumericStatus(SupportableFieldType type)
+        {
+            string overflow = UniConfigLoc.F("numeric.overflow", FieldUtils.GetDisplayName(type));
+            if (_status == overflow || _status == UniConfigLoc.T("numeric.invalid"))
+                _status = string.Empty;
+        }
+
+        private void NoteNumericStatus(NumericEvalStatus status, SupportableFieldType type)
+        {
+            _status = status == NumericEvalStatus.Overflow
+                ? UniConfigLoc.F("numeric.overflow", FieldUtils.GetDisplayName(type))
+                : UniConfigLoc.T("numeric.invalid");
+        }
+
+        private sealed class NumericEdit
+        {
+            public string ControlName;
+            public ConfigTable Table;
+            public int Row;
+            public string FieldName;
+            public SupportableFieldType Type;
+            public Rect ScreenRect;
         }
 
         private static bool CommitRangeValue(
@@ -3039,12 +3301,12 @@ namespace UniConfig.Editor
         {
             if (field.name == MiscTableSchema.TypeField)
             {
-                string raw = item.GetValue(MiscTableSchema.TypeField);
-                string label = MiscTableSchema.TryParseType(raw, out ConfigField parsed)
+                string typeText = item.GetValue(MiscTableSchema.TypeField);
+                string label = MiscTableSchema.TryParseType(typeText, out ConfigField parsed)
                     ? FieldUtils.GetTypeButtonLabel(parsed)
-                    : string.IsNullOrEmpty(raw)
+                    : string.IsNullOrEmpty(typeText)
                         ? SupportableFieldType.Int32.ToString()
-                        : raw;
+                        : typeText;
                 if (EditorGUI.DropdownButton(fieldRect, new GUIContent(label), FocusType.Keyboard))
                 {
                     ConfigField temp = parsed ??
@@ -3078,13 +3340,32 @@ namespace UniConfig.Editor
                 return true;
             }
 
+            bool scalar = ConstraintEvaluator.IsScalarNumeric(valueField.type, out _);
+            string control = CellControlName(row, field.name);
+            string raw = item.GetValue(MiscTableSchema.ValueField);
+            bool focused = string.Equals(GUI.GetNameOfFocusedControl(), control, StringComparison.Ordinal);
+            bool tint = scalar && NumericExpression.ShouldTint(raw, valueField.type, focused);
+            if (tint && Event.current.type == EventType.Repaint)
+                EditorGUI.DrawRect(fieldRect, FkErrorCell);
+
+            Color prevBg = GUI.backgroundColor;
+            if (tint)
+                GUI.backgroundColor = FkErrorCell;
             EditorGUI.BeginChangeCheck();
-            string value = EditorGUI.TextField(fieldRect, item.GetValue(MiscTableSchema.ValueField), _cellStyle);
+            string value = EditorGUI.TextField(fieldRect, raw, _cellStyle);
+            GUI.backgroundColor = prevBg;
             if (EditorGUI.EndChangeCheck())
             {
                 item.SetValue(MiscTableSchema.ValueField, value);
                 _dirty = true;
             }
+
+            focused = string.Equals(GUI.GetNameOfFocusedControl(), control, StringComparison.Ordinal);
+            if (scalar && focused)
+                NoteNumericEdit(control, table, row, MiscTableSchema.ValueField, valueField.type, fieldRect);
+            if (scalar && NumericExpression.ShouldTint(item.GetValue(MiscTableSchema.ValueField), valueField.type,
+                    focused))
+                DrawRectBorder(fieldRect, FkErrorBorder, 2f);
 
             return true;
         }

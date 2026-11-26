@@ -66,6 +66,16 @@ namespace UniConfig.Editor
         [NonSerialized] public HashSet<string> fkCellViolations = new();
 
         /// <summary>
+        /// 一维数组范围违规单元格："{rowIndex}\0{fieldName}"
+        /// </summary>
+        [NonSerialized] public HashSet<string> rangeCellViolations = new();
+
+        /// <summary>
+        /// 一维数组范围状态栏说明。
+        /// </summary>
+        [NonSerialized] public string rangeStatusDetail = string.Empty;
+
+        /// <summary>
         /// 外键不合法的约束目标字段名（列表项标红用）。
         /// </summary>
         [NonSerialized] public HashSet<string> fkInvalidTargetFields = new(StringComparer.Ordinal);
@@ -91,6 +101,9 @@ namespace UniConfig.Editor
             (fkInvalidTargetFields != null && fkInvalidTargetFields.Count > 0) ||
             (fkCellViolations != null && fkCellViolations.Count > 0);
 
+        public bool HasRangeViolations =>
+            rangeCellViolations != null && rangeCellViolations.Count > 0;
+
         public static string FkCellKey(int rowIndex, string fieldName)
         {
             return rowIndex + "\0" + fieldName;
@@ -100,6 +113,12 @@ namespace UniConfig.Editor
         {
             return fkCellViolations != null &&
                    fkCellViolations.Contains(FkCellKey(rowIndex, fieldName));
+        }
+
+        public bool IsRangeCellViolation(int rowIndex, string fieldName)
+        {
+            return rangeCellViolations != null &&
+                   rangeCellViolations.Contains(FkCellKey(rowIndex, fieldName));
         }
 
         public bool IsFkConstraintInvalid(FieldConstraint constraint)
